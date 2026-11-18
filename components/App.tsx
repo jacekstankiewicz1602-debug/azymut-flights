@@ -7,7 +7,7 @@ import { AIRPORT_POS, ccOf, countryName, fmtDate, fmtPln, fmtTime } from "./geo"
 import { SearchFormPanel, toSearchForm, type FormState } from "./Form";
 import { AnywherePanel, openAnywhere } from "./Anywhere";
 import { feedLine, type FeedLine } from "./feed";
-import { getState, liveArcs, markBest, PEEK_H, resetSearch, setState, sheetPx, sheetSnap, touchArc, useIsPhone, useStore, type Pin, type State, type Stats } from "./store";
+import { getState, isPhone, liveArcs, markBest, PEEK_H, resetSearch, setState, sheetPx, sheetSnap, touchArc, useIsPhone, useStore, type Pin, type State, type Stats } from "./store";
 import { enablePush, pushState, refreshPush, type PushState } from "./push";
 import { locale, plural as plu, setLang, storedLang, t as tr, tx, useLang } from "./i18n";
 import { bagOf, bookings, plural, carrierCode, cityOf as tripCity, connBefore, dur, ICONS, isGround as groundLeg, isOneTicket, logoUrl, ticketNumbers } from "./trip-info";
@@ -206,6 +206,8 @@ function play(i: number) {
  *  the same one again closes it). On a phone the sheet folds down so the flight is visible. */
 const select = (i: number) => setState((s) => s.selected === i
   ? { selected: null, focusLeg: null, journeyPhase: "none" }
+  // phone: the sheet folds to its top line and the whole route shows at once (the flight is "Animacja")
+  : isPhone() ? { selected: i, focusLeg: null, journeyPhase: "none", panelOpen: false }
   : { selected: i, focusLeg: null, journeyKey: s.journeyKey + 1, journeyPhase: "flying", journeyInline: true, panelOpen: window.innerWidth > 900 ? s.panelOpen : false });
 
 /** Open trip i of the list (the arrows in a card, ← → on the keyboard). */
@@ -1076,44 +1078,97 @@ function stepSheet() {
   setState((s) => (!s.panelOpen ? { panelOpen: true, sheet: "half" } : s.sheet === "half" ? { sheet: "full" } : { panelOpen: false }));
 }
 
-/** Phone: the results sheet follows the finger and springs to the nearest of peek / half / full
- *  (where the flick would carry it); a tap without a drag steps it like the keyboard. */
-function useSheetDrag() {
-  const sheetRef = useRef<HTMLElement>(null);
-  const st = useRef<{ y: number; h: number; t: number; moved: boolean; id: number } | null>(null);
-  const maxH = () => (sheetRef.current?.parentElement?.clientHeight ?? window.innerHeight) - 56;
-  const drag = {
-    onPointerDown: (e: React.PointerEvent) => {
-      const el = sheetRef.current;
-      if (!el) return;
-      st.current = { y: e.clientY, h: el.getBoundingClientRect().height, t: performance.now(), moved: false, id: e.pointerId };
-      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-    },
-    onPointerMove: (e: React.PointerEvent) => {
-      const d = st.current, el = sheetRef.current;
-      if (!d || !el) return;
-      const dy = e.clientY - d.y;
-      if (!d.moved && Math.abs(dy) < 6) return;
-      if (!d.moved) { d.moved = true; if (!getState().panelOpen) setState({ panelOpen: true, sheet: "half" }); }
+/** Phone: the results sheet follows the finger 1:1 (transform only, no React render per frame) and
+ *  springs to peek / half / full where the flick would carry it. The whole sheet is a handle, except the
+ *  list when the sheet is full: there it scrolls, and pulling down at its top drags the sheet (iOS). A
+ *  tap on the handle steps the snaps. The resting positions are CSS (translateY of the sheet's height). */
+function useSheetDrag(snap: "peek" | "half" | "full") {
+  // a callback ref: the sheet mounts only once a search exists, and the listeners follow the element
+  const [el, sheetRef] = useState<HTMLElement | null>(null);
+  const snapRef = useRef(snap);
+  snapRef.current = snap;
+  useEffect(() => {
+    if (!el) return;
+    type G = { y0: number; off0: number; dragging: boolean; body: HTMLElement | null; onHandle: boolean; pts: [number, number][]; id: number | "t" };
+    let g: G | null = null;
+    const offsetNow = () => new DOMMatrixReadOnly(getComputedStyle(el).transform).m42;
+    const targets = () => {
+      const H = el.getBoundingClientRect().height;
+      return { peek: Math.max(0, H - PEEK_H), half: Math.max(0, H - window.innerHeight * 0.5), full: 0 };
+    };
+    const start = (y: number, target: EventTarget | null, id: number | "t") => {
+      const t = target as HTMLElement | null;
       el.style.transition = "none";
-      el.style.height = `${Math.max(PEEK_H * 0.7, Math.min(maxH(), d.h - dy))}px`;
-    },
-    onPointerUp: (e: React.PointerEvent) => {
-      const d = st.current, el = sheetRef.current;
-      st.current = null;
-      if (!d || !el) return;
-      if (!d.moved) { stepSheet(); return; }
-      const dy = e.clientY - d.y, v = dy / Math.max(16, performance.now() - d.t); // px per ms, + = down
-      const aim = d.h - dy - v * 220;
-      const snaps: ["peek" | "half" | "full", number][] = [["peek", PEEK_H], ["half", sheetPx("half")], ["full", maxH()]];
-      const to = snaps.reduce((a, b) => (Math.abs(b[1] - aim) < Math.abs(a[1] - aim) ? b : a))[0];
-      el.style.height = `${el.getBoundingClientRect().height}px`;
-      requestAnimationFrame(() => { el.style.transition = ""; el.style.height = ""; });
+      const off0 = offsetNow();
+      el.style.transform = `translateY(${off0}px)`; // freeze a spring still running
+      g = { y0: y, off0, dragging: false, body: t?.closest(".r-body") as HTMLElement | null, onHandle: !!t?.closest(".ph-handle"), pts: [[performance.now(), y]], id };
+    };
+    // true when the gesture is (or becomes) a sheet drag; false leaves it to the list's own scroll
+    const move = (y: number): boolean => {
+      if (!g) return false;
+      const dy = y - g.y0;
+      g.pts.push([performance.now(), y]);
+      if (g.pts.length > 6) g.pts.shift();
+      if (!g.dragging) {
+        if (Math.abs(dy) < 6) return false;
+        // a full sheet's list scrolls; only a pull down from its very top moves the sheet
+        if (g.body && snapRef.current === "full" && !(dy > 0 && g.body.scrollTop <= 0)) { release(); return false; }
+        g.dragging = true;
+        g.y0 = y; // no jump by the 6 px dead zone
+      }
+      const tg = targets();
+      let off = g.off0 + (y - g.y0);
+      // rubber band past the ends
+      if (off < 0) off = -Math.sqrt(-off) * 3;
+      if (off > tg.peek) off = tg.peek + Math.sqrt(off - tg.peek) * 3;
+      el.style.transform = `translateY(${off}px)`;
+      return true;
+    };
+    const release = () => { el.style.transition = ""; el.style.transform = ""; g = null; };
+    const end = () => {
+      if (!g) return;
+      const d = g;
+      g = null;
+      if (!d.dragging) { el.style.transition = ""; el.style.transform = ""; if (d.onHandle) stepSheet(); return; }
+      // velocity over the last ~100 ms of movement (not of the clock: the finger may rest before lifting
+      // only if it really rested), px per ms, + = down; at least two samples
+      const [t1, y1] = d.pts[d.pts.length - 1];
+      const rested = performance.now() - t1 > 120;
+      const back = d.pts.filter(([t]) => t1 - t <= 100);
+      const [t0, y0] = back.length > 1 ? back[0] : d.pts[Math.max(0, d.pts.length - 2)];
+      const v = rested || t1 <= t0 ? 0 : (y1 - y0) / (t1 - t0);
+      const off = offsetNow(), tg = targets();
+      const aim = off + v * 260;
+      const to = (Object.entries(tg) as ["peek" | "half" | "full", number][]).reduce((a, b) => (Math.abs(b[1] - aim) < Math.abs(a[1] - aim) ? b : a))[0];
+      // the spring: faster after a quick flick, a soft overshoot-free settle
+      const dur = Math.max(0.26, Math.min(0.5, Math.abs(tg[to] - off) / Math.max(1.2, Math.abs(v) * 1.6) / 1000 * 2.2));
+      el.style.transition = `transform ${dur}s cubic-bezier(0.2, 0.9, 0.25, 1)`;
+      el.style.transform = `translateY(${tg[to]}px)`;
+      const done = () => { el.removeEventListener("transitionend", done); if (!g) { el.style.transition = ""; el.style.transform = ""; } };
+      el.addEventListener("transitionend", done);
+      setTimeout(done, dur * 1000 + 80);
       setState(to === "peek" ? { panelOpen: false } : { panelOpen: true, sheet: to });
-    },
-    onPointerCancel: () => { const el = sheetRef.current; st.current = null; if (el) { el.style.transition = ""; el.style.height = ""; } },
-  };
-  return { sheetRef, drag };
+    };
+    const ts = (e: TouchEvent) => { if (e.touches.length === 1) start(e.touches[0].clientY, e.target, "t"); };
+    const tm = (e: TouchEvent) => { if (g && move(e.touches[0].clientY) && e.cancelable) e.preventDefault(); };
+    const te = () => end();
+    // mouse (a narrow desktop window, tests): the same gesture
+    const pd = (e: PointerEvent) => { if (e.pointerType === "mouse" && e.button === 0) start(e.clientY, e.target, e.pointerId); };
+    const pm = (e: PointerEvent) => { if (e.pointerType === "mouse" && g && g.id === e.pointerId && move(e.clientY)) e.preventDefault(); };
+    const pu = (e: PointerEvent) => { if (e.pointerType === "mouse" && g && g.id === e.pointerId) end(); };
+    el.addEventListener("touchstart", ts, { passive: true });
+    el.addEventListener("touchmove", tm, { passive: false });
+    el.addEventListener("touchend", te);
+    el.addEventListener("touchcancel", te);
+    el.addEventListener("pointerdown", pd);
+    window.addEventListener("pointermove", pm);
+    window.addEventListener("pointerup", pu);
+    return () => {
+      el.removeEventListener("touchstart", ts); el.removeEventListener("touchmove", tm); el.removeEventListener("touchend", te); el.removeEventListener("touchcancel", te);
+      el.removeEventListener("pointerdown", pd); window.removeEventListener("pointermove", pm); window.removeEventListener("pointerup", pu);
+    };
+  }, [el]);
+  return { sheetRef };
 }
 
 /** "bez przesiadek" / "1 przesiadka" for the outbound (the busier direction when it is a round trip). */
@@ -1160,7 +1215,7 @@ function Results() {
   const [city, setCity] = useState<string | null>(null);
   const phone = useIsPhone();
   const snap = useStore(sheetSnap);
-  const { sheetRef, drag } = useSheetDrag();
+  const { sheetRef } = useSheetDrag(snap);
   const [openCc, setOpenCc] = useState<string | null>(null);
   const rows = useDestinations(r, params);
   // a region spanning several countries shows one entry per country; a single country one per city
@@ -1242,12 +1297,13 @@ function Results() {
   </>;
   if (phone) return (
     <section ref={sheetRef} className={`results glass ph-sheet sheet-${snap}`} aria-label={tr("Wyniki")} hidden={journey !== "none" && !inline}>
-      <div className="r-handle ph-handle" role="button" tabIndex={0} aria-expanded={open} aria-label={tr("Wyniki")} {...drag}
+      <div className="r-handle ph-handle" role="button" tabIndex={0} aria-expanded={open} aria-label={tr("Wyniki")}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); stepSheet(); } }}>
         <span className="r-grip" />
         <PeekLine r={r} pax={pax} params={params} />
       </div>
-      {open && <div className="r-body scroll">{body}</div>}
+      {/* always there, so a drag reveals it; it scrolls only when the sheet is full */}
+      <div className="r-body scroll">{body}</div>
     </section>
   );
   return (

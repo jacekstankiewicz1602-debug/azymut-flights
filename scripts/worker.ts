@@ -125,7 +125,9 @@ async function runOne(id: string, deep: boolean, researchMin?: number) {
     const rang = b !== null && lastBell !== null && b !== lastBell;
     if (b !== null) lastBell = b;
     const sweep = Date.now() - lastSweep > (b === null ? 5 : 30) * 60_000; // no doorbell: sweep every 5 min
-    if (rang || sweep || Date.now() < hotUntil) {
+    // Neon bills every awake minute: while searches run (they keep it awake on their own) a new one is
+    // claimed only on the doorbell or the sweep, never by polling every few seconds
+    if (rang || sweep || (Date.now() < hotUntil && running.size === 0)) {
       if (sweep) lastSweep = Date.now();
       if (rang || sweep) await heartbeat();
       // another search only with room for it: a free slot and the heap under half its limit
@@ -134,8 +136,8 @@ async function runOne(id: string, deep: boolean, researchMin?: number) {
       if (job) {
         running.add(job.id);
         void runOne(job.id, job.deep, job.researchMin).catch((e) => console.error("search", job.id, e))
-          .finally(() => { running.delete(job.id); hotUntil = Date.now() + 10 * 60_000; });
-        hotUntil = Date.now() + 10 * 60_000;
+          .finally(() => { running.delete(job.id); hotUntil = Date.now() + 2 * 60_000; });
+        hotUntil = Date.now() + 2 * 60_000;
         continue;
       }
       if (rang) hotUntil = Math.max(hotUntil, Date.now() + 60_000); // the ring may beat the insert's commit

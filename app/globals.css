@@ -1063,3 +1063,16 @@ li.open > .any-row, li.open > .dest { background: var(--sunken); }
   .ph-sheet .progress .pg-prices { display: none; }
   .ph-handle:focus-visible { outline-offset: -3px; border-radius: 22px 22px 0 0; }
 }
+@media (max-width: 720px) {
+  /* the sheet keeps the full height and slides: its resting positions are translateY of its own height */
+  .results.ph-sheet, .results.ph-sheet.sheet-peek, .results.ph-sheet.sheet-half, .results.ph-sheet.sheet-full {
+    height: calc(100dvh - var(--tab-h) - var(--sab) - var(--sat) - 10px); will-change: transform;
+    transition: transform 0.5s cubic-bezier(0.2, 0.9, 0.25, 1); touch-action: none; }
+  .results.ph-sheet.sheet-peek { transform: translateY(calc(100% - 116px)); }
+  .results.ph-sheet.sheet-half { transform: translateY(max(0px, calc(100% - 50dvh))); }
+  .results.ph-sheet.sheet-full { transform: none; }
+  .results.ph-sheet .r-body { overflow: hidden; touch-action: none; }
+  .results.ph-sheet.sheet-full .r-body { overflow-y: auto; touch-action: pan-y; }
+  .ph-handle { cursor: grab; }
+}
+@media (max-width: 720px) { .results.ph-sheet { animation: none; } }

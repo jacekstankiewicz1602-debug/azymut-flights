@@ -79,6 +79,10 @@ function timeline(trip: Trip): Seg[] {
   return segs;
 }
 
+/** Phone: routes are framed no closer than this, so the globe's curve shows and the arcs rise over it as
+ *  on the laptop (closer in, a narrow screen flattens the earth and the arcs look like straight strokes). */
+const PHONE_ZOOM = 2.6;
+
 /** Phone: camera padding so the map's centre is the free area — below the search pill, above the
  *  results sheet (its snap height) and the tab bar; nothing under a full sheet or during a journey. */
 function phonePad(s: ReturnType<typeof getState>) {
@@ -238,14 +242,30 @@ class EarthController {
     // (the "gdziekolwiek tanio" sheet covers the lower ~58%)
     const pad = isPhone() ? phonePad(s)
       : { top: wide && calm ? 150 : 0, right: panel ? 460 : 0, bottom: !wide && anyList && s.panelOpen ? Math.round(window.innerHeight * 0.55) : 0, left: 0 };
+    // phone: a route about to be framed (a picked trip, a finished search) needs the new padding now —
+    // its fitBounds would cancel an easing padding half way and leave the route off centre
+    const pvNext = s.journeyPhase === "none" && !s.pins && s.selected !== null ? s.result?.trips[s.selected] ?? null : null;
+    const reframe = isPhone() && ((pvNext ? `${pvNext.id}|${s.selected}` : "") !== (this.preview?.key ?? "")
+      || (s.phase === "done" ? s.result?.trips[0]?.id ?? null : null) !== this.lastRest);
     const cur = this.map.getPadding();
     if (cur.top !== pad.top || cur.right !== pad.right || cur.bottom !== pad.bottom) {
-      if (this.map.isMoving() || s.phase !== this.lastPhase || (!!s.pins && !this.lastPins)) this.map.setPadding(pad);
+      if (reframe || this.map.isMoving() || s.phase !== this.lastPhase || (!!s.pins && !this.lastPins)) this.map.setPadding(pad);
       else this.map.easeTo({ padding: pad, duration: 700 });
     }
     // the resting route of a finished search appears (or changes) without a camera move
     const restId = s.phase === "done" ? s.result?.trips[0]?.id ?? null : null;
-    if (restId !== this.lastRest) { this.lastRest = restId; this.map.triggerRepaint(); }
+    if (restId !== this.lastRest) {
+      this.lastRest = restId;
+      this.map.triggerRepaint();
+      // phone: the whole finished route in view, zoomed out enough for the arcs to rise over the globe
+      const t = restId && isPhone() && !s.destPins && !s.pins ? s.result?.trips[0] : null;
+      if (t) {
+        const pts = t.legs.flatMap((l) => greatCircle(l.from, l.to, 24));
+        const b = new maplibregl.LngLatBounds(pts[0], pts[0]);
+        for (const p of pts) b.extend(p);
+        this.map.fitBounds(b, { padding: { top: 40, bottom: 40, left: 36, right: 36 }, maxZoom: PHONE_ZOOM, pitch: 0, bearing: 0, duration: 1400, essential: true });
+      }
+    }
     if (s.phase !== this.lastPhase) {
       this.lastPhase = s.phase;
       if (s.phase === "searching" && s.params) this.frameAirports([...s.params.origin, ...s.params.dest.slice(0, 10)]);
@@ -286,7 +306,7 @@ class EarthController {
         const pts = greatCircle(leg.from, leg.to, 32);
         const b = new maplibregl.LngLatBounds(pts[0], pts[0]);
         for (const p of pts) b.extend(p);
-        this.map.fitBounds(b, { padding: 90, maxZoom: 6, duration: 1100, essential: true });
+        this.map.fitBounds(b, { padding: isPhone() ? 36 : 90, maxZoom: isPhone() ? PHONE_ZOOM + 1 : 6, duration: 1100, essential: true });
       }
       this.map.triggerRepaint();
     }
@@ -311,7 +331,7 @@ class EarthController {
     for (const p of pts) b.extend(p);
     const wide = window.innerWidth > 900;
     // phone: the camera padding already keeps the pill and the sheet free; a margin around the route
-    this.map.fitBounds(b, { padding: wide ? { top: 90, bottom: 70, left: 70, right: 150 } : isPhone() ? { top: 40, bottom: 40, left: 36, right: 36 } : { top: 70, bottom: getState().panelOpen ? Math.round(window.innerHeight * 0.5) : 90, left: 30, right: 90 }, maxZoom: 5, pitch: 0, bearing: 0, duration: 1600, essential: true });
+    this.map.fitBounds(b, { padding: wide ? { top: 90, bottom: 70, left: 70, right: 150 } : isPhone() ? { top: 40, bottom: 40, left: 36, right: 36 } : { top: 70, bottom: getState().panelOpen ? Math.round(window.innerHeight * 0.5) : 90, left: 30, right: 90 }, maxZoom: isPhone() ? PHONE_ZOOM : 5, pitch: 0, bearing: 0, duration: 1600, essential: true });
     this.lastFocus = null;
   }
 
@@ -329,7 +349,7 @@ class EarthController {
     const b = new maplibregl.LngLatBounds(pts[0], pts[0]);
     for (const p of pts) b.extend(p);
     const narrow = window.innerWidth < 720;
-    this.map.fitBounds(b, { padding: narrow ? 30 : { top: 60, bottom: 60, left: 60, right: 60 }, maxZoom: 4, duration: 2400, essential: true, pitch: 0, bearing: 0 });
+    this.map.fitBounds(b, { padding: narrow ? 30 : { top: 60, bottom: 60, left: 60, right: 60 }, maxZoom: isPhone() ? PHONE_ZOOM : 4, duration: 2400, essential: true, pitch: 0, bearing: 0 });
   }
 
   /** Search visualisation: every route asked about stays as a low line of the growing network; the
@@ -638,7 +658,7 @@ class EarthController {
         this.clearMarkers();
         // picked from the list: straight to the whole route drawn (the preview frames it beside the list), no closing card
         if (getState().journeyInline) { setTimeout(() => { if (this.journey === j) setState({ journeyPhase: "none" }); }, 600); return; }
-        map.fitBounds(b, { padding: { top: 140, bottom: 200, left: 80, right: 80 }, maxZoom: 5, pitch: 0, bearing: 0, duration: 2800, essential: true });
+        map.fitBounds(b, { padding: isPhone() ? { top: 90, bottom: 150, left: 36, right: 36 } : { top: 140, bottom: 200, left: 80, right: 80 }, maxZoom: isPhone() ? PHONE_ZOOM : 5, pitch: 0, bearing: 0, duration: 2800, essential: true });
         setTimeout(() => setState({ journeyPhase: "final", journeyTotal: j.trip.price }), 1800);
       }
       return;
