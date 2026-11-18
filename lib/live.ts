@@ -49,16 +49,15 @@ export async function startLive(params: SearchParams): Promise<{ id: string; run
 /** unlimited: the laptop worker; no step deadline, deep budgets, rounds until the optimum is proven or the user stops */
 export type StepOptions = { stepSeconds?: number; hardSeconds?: number; maxMinutes?: number; unlimited?: boolean };
 
-/** Ask a search to stop and show its best result. A queued or Vercel-run search stops at once; the
- *  worker finishes the check in progress (it polls the flag) and saves the best trips. */
+/** Ask a search to stop and show its best result: it is marked stopped at once with the best trips
+ *  saved so far (the page shows them right away); a worker still running it aborts within seconds
+ *  (it polls the flag) and writes its final best trips over them. */
 export async function requestStop(id: string): Promise<boolean> {
   const sql = await sqlClient();
   if (!sql) return false;
   const [r] = await sql`update live_searches set stop_requested = true where id = ${id} and status = 'running' returning runner, claimed_by`;
   if (!r) return false;
-  if (r.runner !== "worker" || !r.claimed_by) {
-    await sql`update live_searches set status = 'stopped', message = 'zatrzymano – pokazuję najlepszy znaleziony wynik', updated_at = now() where id = ${id} and status = 'running'`;
-  }
+  await sql`update live_searches set status = 'stopped', message = 'zatrzymano – pokazuję najlepszy znaleziony wynik', updated_at = now() where id = ${id} and status = 'running'`;
   return true;
 }
 
@@ -241,10 +240,20 @@ export async function runStep(id: string, o: StepOptions = {}): Promise<boolean>
   const beat = setInterval(() => { void pulse(); }, 5_000);
 
   try {
-    const r = await queryLog.run(onQuery, () => (anywhere ? runAnywhere : runSearch)(row.params, emit, ctrl.signal, { deadline: stepEnd, hardStop, incumbents: row.trips, meterBase: row.meter, final: true, unlimited: o.unlimited, capScale: deepState?.capScale,
-      ...(deepState ? { outWindow: deepState.chunks.length > 1 ? deepState.chunks[deepState.chunk] : undefined, round: deepState.round } : {}) }));
+    // "Zatrzymaj i pokaż wynik" does not wait for the engine to wind down (requests in flight can take a
+    // minute): the best trips seen so far are the result, and the runner is free for the next search
+    const aborted = new Promise<null>((res) => ctrl.signal.addEventListener("abort", () => res(null)));
+    const r = await Promise.race([aborted, queryLog.run(onQuery, () => (anywhere ? runAnywhere : runSearch)(row.params, emit, ctrl.signal, { deadline: stepEnd, hardStop, incumbents: row.trips, meterBase: row.meter, final: true, unlimited: o.unlimited, capScale: deepState?.capScale,
+      ...(deepState ? { outWindow: deepState.chunks.length > 1 ? deepState.chunks[deepState.chunk] : undefined, round: deepState.round } : {}) }))]);
     clearInterval(timer); clearInterval(fast); clearInterval(beat);
     await flush();
+    if (!r) {
+      const top = withOneTicket(anywhere ? [...liveTrips.values()].sort((a, b) => a.price - b.price).slice(0, K) : pickTrips([...liveTrips.values()], row.params.dest, K), lastStats);
+      await sql`update live_searches set status = 'stopped', steps = steps + 1, cache = null, seq = ${seq},
+        stats = ${sql.json({ ...(lastStats as object), ...extra(), best: top[0]?.price ?? null, progress: progressOf() } as never)},
+        ${top.length ? sql`trips = ${sql.json(top as never)},` : sql``} message = 'zatrzymano – pokazuję najlepszy znaleziony wynik', updated_at = now() where id = ${id}`;
+      return false;
+    }
     const [sr] = await sql`select stop_requested from live_searches where id = ${id}`.catch(() => [] as never[]);
     if ((sr as { stop_requested?: boolean } | undefined)?.stop_requested) stopAsked = true;
     // keep going while there is time and budget: a paused step, or variants a source did not answer

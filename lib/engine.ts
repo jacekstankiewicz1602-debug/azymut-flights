@@ -1979,7 +1979,7 @@ export async function runSearch(params: SearchParams, emit: Emit, signal?: Abort
           const inside = new Set(L.slice(a, b + 1));
           if (L.slice(a, b + 1).some((l) => legs.some((x) => x.ticket === l.ticket && !inside.has(x)))) continue;
           if (new Set(L.slice(a, b + 1).map((l) => l.ticket)).size < 2) continue; // already one booking
-          if (segBudget-- <= 0 || Date.now() > until) break;
+          if (segBudget-- <= 0 || Date.now() > until || signal?.aborted) break;
           const prev = L[a - 1], next = L[b + 1];
           const opts = await through(L[a].from, L[b].to, L[a].depLocal.slice(0, 10));
           const fit = opts.filter((o) => {
@@ -2056,8 +2056,11 @@ export async function runSearch(params: SearchParams, emit: Emit, signal?: Abort
   // the full Google comparison must be in before the end (a stopped search does not wait for it)
   if (!signal?.aborted) await fullBase;
   // the single-city side lanes: whatever they found by the deadline
-  await Promise.race([sideLanes, new Promise<void>((r) => setTimeout(r, Math.max(0, grace(0) - Date.now())))]);
-  await runBaseline("final").catch(() => {});
+  // "Zatrzymaj i pokaż wynik": no more waiting, the best trips found so far are the answer
+  if (!signal?.aborted) {
+    await Promise.race([sideLanes, new Promise<void>((r) => setTimeout(r, Math.max(0, grace(0) - Date.now())))]);
+    await runBaseline("final").catch(() => {});
+  }
   const base = baseline as Baseline; // assigned inside runBaseline (TS does not see closure writes)
   const gCand = googleCand as Trip | null;
   trips = pickTrips([...found.values()], p.dest, config.resultsK);

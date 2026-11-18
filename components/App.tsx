@@ -142,7 +142,8 @@ function follow(id: string) {
       panelOpen: s.panelOpen || (!!d.trips.length && s.result === null),
     }));
     // deep searches run for hours on the laptop: poll calmly
-    if (running) poll = setTimeout(tick, d.params?.depth === "deep" ? 5000 : 1500);
+    // after "Zatrzymaj" the result shows at once; a few more polls pick up the worker's final best trips
+    if (running || (d.status === "stopped" && Date.now() - stopAt < 20_000)) poll = setTimeout(tick, running && d.params?.depth === "deep" ? 5000 : 1500);
   };
   void tick();
 }
@@ -330,9 +331,11 @@ const clock = (sec: number) => {
 };
 const eta = (sec: number) => sec < 60 ? "< 1 min" : sec < 3600 ? `~${Math.round(sec / 60)} min` : `~${Math.floor(sec / 3600)} h ${Math.round((sec % 3600) / 60)} min`;
 
+let stopAt = 0;
 async function stopSearch() {
   const id = followed;
   if (!id) return;
+  stopAt = Date.now();
   setState({ message: "Zatrzymuję – za chwilę pokażę wynik" });
   await fetch("/api/search/stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => null);
 }
