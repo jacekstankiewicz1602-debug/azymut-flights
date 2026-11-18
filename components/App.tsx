@@ -1,6 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { SearchResult, Trip } from "@/lib/engine";
 import type { SearchParams } from "@/lib/types";
 import { AIRPORT_POS, ccOf, countryName, fmtDate, fmtPln, fmtTime } from "./geo";
@@ -9,6 +10,7 @@ import { AnywherePanel, openAnywhere } from "./Anywhere";
 import { feedLine, type FeedLine } from "./feed";
 import { getState, isPhone, liveArcs, markBest, PEEK_H, resetSearch, setState, sheetPx, sheetSnap, touchArc, useIsPhone, useStore, type Pin, type State, type Stats } from "./store";
 import { enablePush, pushState, refreshPush, type PushState } from "./push";
+import { useSwipeClose } from "./swipe";
 import { locale, plural as plu, setLang, storedLang, t as tr, tx, useLang } from "./i18n";
 import { bagOf, bookings, plural, carrierCode, cityOf as tripCity, connBefore, dur, ICONS, isGround as groundLeg, isOneTicket, logoUrl, ticketNumbers } from "./trip-info";
 
@@ -340,24 +342,27 @@ function searchSummary(p: SearchParams | null): string {
 
 function PhoneMenu() {
   const [open, setOpen] = useState(false);
+  const swipe = useSwipeClose(() => setOpen(false));
   return <>
     <button className="ph-round" onClick={() => setOpen(true)} aria-label={tr("Menu")}><Icon name="menu" className="" /></button>
-    {open && <div className="ph-scrim" onClick={() => setOpen(false)}>
-      <div className="ph-menu" role="dialog" aria-label={tr("Menu")} onClick={(e) => e.stopPropagation()}>
+    {/* to <body>: inside the top bar it would sit in the bar's stacking layer, under the results sheet */}
+    {open && createPortal(<div className="ph-scrim" onClick={() => setOpen(false)}>
+      <div ref={swipe} className="ph-menu" role="dialog" aria-label={tr("Menu")} onClick={(e) => e.stopPropagation()}>
         <div className="ph-menu-head"><span className="ph-logo">Azymut</span>
           <button className="ph-round flat" onClick={() => setOpen(false)} aria-label={tr("Zamknij")}><Icon name="close" className="" /></button></div>
         <div className="ph-menu-row"><span>{tr("Motyw")}</span><ThemeSwitch /></div>
         <div className="ph-menu-row"><span>{tr("Język")}</span><LangSwitch /></div>
       </div>
-    </div>}
+    </div>, document.body)}
   </>;
 }
 
 function PhoneRecent({ close }: { close: () => void }) {
   const items = useRecentItems(true);
+  const swipe = useSwipeClose(close);
   return (
     <div className="ph-scrim" onClick={close}>
-      <div className="ph-sheet-panel" role="dialog" aria-label={tr("Ostatnie")} onClick={(e) => e.stopPropagation()}>
+      <div ref={swipe} className="ph-sheet-panel" role="dialog" aria-label={tr("Ostatnie")} onClick={(e) => e.stopPropagation()}>
         <div className="ph-menu-head"><span className="ph-title">{tr("Ostatnie")}</span>
           <button className="ph-round flat" onClick={close} aria-label={tr("Zamknij")}><Icon name="close" className="" /></button></div>
         <div className="ph-sheet-scroll" role="menu"><RecentList items={items} onGo={(id) => { close(); goSearch(id); }} /></div>
@@ -1170,12 +1175,60 @@ function useSheetDrag(snap: "peek" | "half" | "full") {
     el.addEventListener("pointerdown", pd);
     window.addEventListener("pointermove", pm);
     window.addEventListener("pointerup", pu);
+    const undebug = touchDebug(el, () => (g ? `g own=${g.own} drag=${g.dragging}` : "g -"));
     return () => {
+      undebug();
       el.removeEventListener("touchstart", ts); el.removeEventListener("touchmove", tm); el.removeEventListener("touchend", te); el.removeEventListener("touchcancel", te);
       el.removeEventListener("pointerdown", pd); window.removeEventListener("pointermove", pm); window.removeEventListener("pointerup", pu);
     };
   }, [el]);
   return { sheetRef };
+}
+
+/** ?touchdebug=1: a strip at the top of the screen with what a real phone's touches do to the sheet. */
+function touchDebug(el: HTMLElement, gesture: () => string) {
+  let on = false;
+  try {
+    if (new URLSearchParams(location.search).has("touchdebug")) sessionStorage.setItem("azymut-touchdebug", "1");
+    on = sessionStorage.getItem("azymut-touchdebug") === "1";
+  } catch {}
+  if (!on) return () => {};
+  const box = document.createElement("pre");
+  box.style.cssText = "position:fixed;z-index:99;top:env(safe-area-inset-top);left:0;right:0;margin:0;padding:6px 8px;font:11px/1.35 monospace;background:rgba(0,0,0,.82);color:#7f7;white-space:pre-wrap;pointer-events:none";
+  document.body.appendChild(box);
+  const n: Record<string, number> = {};
+  let last = "", hit = "";
+  const name = (t: EventTarget | null) => (t instanceof Element ? `${t.tagName.toLowerCase()}.${String(t.className).split(" ").slice(0, 2).join(".")}` : String(t));
+  const show = () => {
+    const tf = getComputedStyle(el).transform;
+    box.textContent = [
+      `vp ${innerWidth}x${innerHeight} vv ${Math.round(visualViewport?.height ?? 0)} scrollY ${Math.round(scrollY)} sa ${CSS.supports("touch-action", "none")}`,
+      `sheet ${el.className.match(/sheet-\w+/)?.[0]} top ${Math.round(el.getBoundingClientRect().top)} tf ${tf.slice(0, 40)}`,
+      `hit ${hit}`,
+      `doc ${["touchstart", "touchmove", "touchend", "touchcancel", "pointercancel", "scroll"].map((k) => `${k.replace("touch", "t").replace("pointer", "p")}:${n["d" + k] ?? 0}`).join(" ")}`,
+      `sheet ${["touchstart", "touchmove", "touchend", "touchcancel"].map((k) => `${k.replace("touch", "t")}:${n["s" + k] ?? 0}`).join(" ")} prevented:${n.prev ?? 0}`,
+      `${gesture()} ${last}`,
+    ].join("\n");
+  };
+  const docL = (e: Event) => {
+    n["d" + e.type] = (n["d" + e.type] ?? 0) + 1;
+    if (e.type === "touchstart") { const t = (e as TouchEvent).touches[0]; hit = `${name(e.target)} @${Math.round(t.clientY)} topmost ${name(document.elementFromPoint(t.clientX, t.clientY))}`; }
+    if (e.type === "touchmove") last = `cancelable ${e.cancelable} y ${Math.round((e as TouchEvent).touches[0]?.clientY ?? 0)}`;
+    show();
+  };
+  // after the sheet's own handler: records whether it cancelled the move
+  const elL = (e: Event) => { n["s" + e.type] = (n["s" + e.type] ?? 0) + 1; if (e.type === "touchmove" && e.defaultPrevented) n.prev = (n.prev ?? 0) + 1; show(); };
+  const docTypes = ["touchstart", "touchmove", "touchend", "touchcancel", "pointercancel", "scroll"];
+  for (const k of docTypes) document.addEventListener(k, docL, { capture: true, passive: true });
+  for (const k of ["touchstart", "touchmove", "touchend", "touchcancel"]) el.addEventListener(k, elL, { passive: true });
+  const iv = setInterval(show, 500);
+  show();
+  return () => {
+    clearInterval(iv);
+    box.remove();
+    for (const k of docTypes) document.removeEventListener(k, docL, { capture: true });
+    for (const k of ["touchstart", "touchmove", "touchend", "touchcancel"]) el.removeEventListener(k, elL);
+  };
 }
 
 /** "bez przesiadek" / "1 przesiadka" for the outbound (the busier direction when it is a round trip). */
@@ -1473,6 +1526,7 @@ function Radar() {
   const [data, setData] = useState<RadarData | null>(null);
   const [watch, setWatch] = useState("");
   const [err, setErr] = useState("");
+  const swipe = useSwipeClose(() => setRadar(false));
   const load = (s = sort) => fetch(`/api/radar?sort=${s}`).then((r) => r.json()).then(setData).catch(() => setErr(tr("nie udało się wczytać radaru")));
   useEffect(() => { if (open) void load(); }, [open, sort]);
   if (!open) return null;
@@ -1484,7 +1538,7 @@ function Radar() {
   };
   const remove = async (id: number) => { await fetch("/api/radar", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ unwatch: id }) }); void load(); };
   return (
-    <section className="radar glass fade-in">
+    <section ref={swipe} className="radar glass fade-in">
       <div className="rd-head">
         <div className="caps">{tr("radar okazji")}</div>
         <div className="rd-sort mono">

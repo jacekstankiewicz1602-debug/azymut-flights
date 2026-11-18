@@ -1076,3 +1076,10 @@ li.open > .any-row, li.open > .dest { background: var(--sunken); }
   .ph-handle { cursor: grab; }
 }
 @media (max-width: 720px) { .results.ph-sheet { animation: none; } }
+
+/* phone: no backdrop blur. Safari recomputes every blurred panel on each globe frame, and the
+   panels over the animated map made the whole page (taps, drags) lag on an iPhone */
+@media (max-width: 720px) {
+  :root[data-theme] { --surface: var(--panel); --surface-strong: var(--panel); }
+  *, *::before, *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+}

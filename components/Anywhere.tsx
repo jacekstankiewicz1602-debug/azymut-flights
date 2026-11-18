@@ -9,6 +9,7 @@ import { defaultForm, MonthGrid, PriceChart, scale, useCalendar, type FormState 
 import { getState, setState, useStore, type Pin } from "./store";
 import { plural, svg } from "./trip-info";
 import { locale, t, tx, useLang } from "./i18n";
+import { useSwipeClose } from "./swipe";
 
 type Row = {
   dest: string; month: string; stay: string; price: number | null; lb: number | null; nodes: string[] | null;
@@ -95,11 +96,12 @@ export function AnywherePanel({ onSearch }: { onSearch: (f: FormState) => void }
     setOpenCc(ccOf(pick)); setDetail(null); setState({ pinPick: null, panelOpen: true });
     setTimeout(() => document.getElementById(`cc-${ccOf(pick)}`)?.scrollIntoView({ block: "start", behavior: "smooth" }), 80);
   }, [pick]);
+  const swipe = useSwipeClose(() => { setState({ pins: null, pinPick: null }); setDetail(null); });
   if (!active || journey !== "none") return null;
   const sel = detail ? rows.find((r) => r.dest === detail) ?? null : null;
   const close = () => { setState({ pins: null, pinPick: null }); setDetail(null); };
   return (
-    <section className={`results glass anyc ${open ? "open" : "closed"}`} aria-label={t("Gdziekolwiek tanio z Polski")}>
+    <section ref={swipe} className={`results glass anyc ${open ? "open" : "closed"}`} aria-label={t("Gdziekolwiek tanio z Polski")}>
       <div className="r-handle any-head">
         <button className="any-title" onClick={() => setState((s) => ({ panelOpen: !s.panelOpen }))} aria-expanded={open}>
           <span className="r-grip" />{t("Gdziekolwiek tanio z Polski")}

@@ -582,6 +582,7 @@ class EarthController {
     if (reset) this.map.easeTo({ pitch: 0, bearing: 0, duration: 900 });
   }
 
+  private liveT = 0;
   private frame() {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.prevT) / 1000);
@@ -589,11 +590,12 @@ class EarthController {
     const j = this.journey;
     const map = this.map;
     if (this.preloadKey >= 0) return;
-    if (!j && liveArcs.size && getState().phase === "searching") map.triggerRepaint(); // animated live arcs
+    // animated live arcs; a phone draws them at ~30 fps to leave its main thread to the fingers
+    if (!j && liveArcs.size && getState().phase === "searching" && (!isPhone() || now - this.liveT > 33)) { this.liveT = now; map.triggerRepaint(); }
     if (!j) {
       const s = getState();
-      // slow drift while nobody touches the globe
-      if (now - this.lastInteract > 6000 && (s.phase === "idle" || s.phase === "done") && s.selected === null && !s.destPins && !map.isMoving() && map.getZoom() < 3.2) {
+      // slow drift while nobody touches the globe (not on a phone: a frame every frame for nothing)
+      if (!isPhone() && now - this.lastInteract > 6000 && (s.phase === "idle" || s.phase === "done") && s.selected === null && !s.destPins && !map.isMoving() && map.getZoom() < 3.2) {
         const c = map.getCenter();
         map.jumpTo({ center: [c.lng + 2.2 * dt, c.lat] });
       }
@@ -700,7 +702,7 @@ export default function Earth() {
     try {
       map = new maplibregl.Map({
         container: host.current!, style: mapStyle(th), center: [home.lon - 18, home.lat - 6], zoom: 1.55,
-        canvasContextAttributes: { antialias: true }, pixelRatio: Math.min(window.devicePixelRatio || 1, 2), maxPitch: 70,
+        canvasContextAttributes: { antialias: !isPhone() }, pixelRatio: Math.min(window.devicePixelRatio || 1, 2), maxPitch: 70,
         attributionControl: false, renderWorldCopies: false, fadeDuration: 200,
         maxTileCacheSize: 1200, maxTileCacheZoomLevels: 12, // keeps every tile the journey preload fetched
       });
