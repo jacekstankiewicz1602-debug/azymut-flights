@@ -1089,7 +1089,9 @@ function useSheetDrag(snap: "peek" | "half" | "full") {
   snapRef.current = snap;
   useEffect(() => {
     if (!el) return;
-    type G = { y0: number; off0: number; dragging: boolean; body: HTMLElement | null; onHandle: boolean; pts: [number, number][]; id: number | "t" };
+    // own: the gesture is the sheet's from the first touch (the handle, or a sheet that is not full);
+    // Safari hands a touch to native scrolling for good if the first moves are not cancelled
+    type G = { y0: number; off0: number; dragging: boolean; body: HTMLElement | null; onHandle: boolean; own: boolean; pts: [number, number][]; id: number | "t" };
     let g: G | null = null;
     const offsetNow = () => new DOMMatrixReadOnly(getComputedStyle(el).transform).m42;
     const targets = () => {
@@ -1101,7 +1103,8 @@ function useSheetDrag(snap: "peek" | "half" | "full") {
       el.style.transition = "none";
       const off0 = offsetNow();
       el.style.transform = `translateY(${off0}px)`; // freeze a spring still running
-      g = { y0: y, off0, dragging: false, body: t?.closest(".r-body") as HTMLElement | null, onHandle: !!t?.closest(".ph-handle"), pts: [[performance.now(), y]], id };
+      const body = t?.closest(".r-body") as HTMLElement | null;
+      g = { y0: y, off0, dragging: false, body, onHandle: !!t?.closest(".ph-handle"), own: !body || snapRef.current !== "full", pts: [[performance.now(), y]], id };
     };
     // true when the gesture is (or becomes) a sheet drag; false leaves it to the list's own scroll
     const move = (y: number): boolean => {
@@ -1150,7 +1153,11 @@ function useSheetDrag(snap: "peek" | "half" | "full") {
       setState(to === "peek" ? { panelOpen: false } : { panelOpen: true, sheet: to });
     };
     const ts = (e: TouchEvent) => { if (e.touches.length === 1) start(e.touches[0].clientY, e.target, "t"); };
-    const tm = (e: TouchEvent) => { if (g && move(e.touches[0].clientY) && e.cancelable) e.preventDefault(); };
+    const tm = (e: TouchEvent) => {
+      if (!g) return;
+      const own = g.own;
+      if ((move(e.touches[0].clientY) || own) && e.cancelable) e.preventDefault();
+    };
     const te = () => end();
     // mouse (a narrow desktop window, tests): the same gesture
     const pd = (e: PointerEvent) => { if (e.pointerType === "mouse" && e.button === 0) start(e.clientY, e.target, e.pointerId); };
