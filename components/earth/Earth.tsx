@@ -331,7 +331,7 @@ class EarthController {
     for (const p of pts) b.extend(p);
     const wide = window.innerWidth > 900;
     // phone: the camera padding already keeps the pill and the sheet free; a margin around the route
-    this.map.fitBounds(b, { padding: wide ? { top: 90, bottom: 70, left: 70, right: 150 } : isPhone() ? { top: 40, bottom: 40, left: 36, right: 36 } : { top: 70, bottom: getState().panelOpen ? Math.round(window.innerHeight * 0.5) : 90, left: 30, right: 90 }, maxZoom: isPhone() ? PHONE_ZOOM : 5, pitch: 0, bearing: 0, duration: 1600, essential: true });
+    this.map.fitBounds(b, { padding: wide ? { top: 90, bottom: 70, left: 70, right: 150 } : isPhone() ? { top: 40, bottom: 40, left: 36, right: 110 } : { top: 70, bottom: getState().panelOpen ? Math.round(window.innerHeight * 0.5) : 90, left: 30, right: 90 }, maxZoom: isPhone() ? PHONE_ZOOM : 5, pitch: 0, bearing: 0, duration: 1600, essential: true });
     this.lastFocus = null;
   }
 
@@ -406,6 +406,7 @@ class EarthController {
     const rest = !j && !pv && !live && this.preloadKey < 0 && st.phase === "done" && !st.destPins && !st.pins ? st.result?.trips[0] ?? null : null;
     if (!j && !live && !pv && !rest) { if (this.wasDrawing) { this.arcs.clear(); this.wasDrawing = false; } return; }
     if (!this.arcs.begin()) return;
+    this.arcs.bend = isPhone() ? 0.17 : 0;
     this.wasDrawing = true;
     const c = colors(this.theme);
     if (live) { this.arcs.live(this.liveDraws(now), c, now); return; }

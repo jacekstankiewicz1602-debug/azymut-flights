@@ -7,8 +7,10 @@ export const config = {
     duffel: process.env.DUFFEL_TOKEN || "",
     anthropic: process.env.ANTHROPIC_API_KEY || "",
   },
-  // AZYMUT_DATABASE_URL first: the Neon integration manages DATABASE_URL on Vercel (the original project ran out of its free quota)
-  databaseUrl: process.env.AZYMUT_DATABASE_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL || "",
+  // the database in use: npm run local's own (AZYMUT_LOCAL); else the newest Neon database connected on
+  // Vercel with its own prefix (AZ2_: the earlier ones ran out of their free compute), then the older names
+  databaseUrl: (process.env.AZYMUT_LOCAL ? process.env.AZYMUT_DATABASE_URL : process.env.AZ2_DATABASE_URL || process.env.AZYMUT_DATABASE_URL)
+    || process.env.DATABASE_URL || process.env.POSTGRES_URL || "",
   appPassword: process.env.APP_PASSWORD || "",
   cronSecret: process.env.CRON_SECRET || "",
 

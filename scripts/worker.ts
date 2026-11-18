@@ -113,7 +113,7 @@ async function runOne(id: string, deep: boolean, researchMin?: number) {
   // database only when it rings, for 10 minutes after a search, and in a sweep every 30 minutes
   // (heartbeat, missed rings, nightly jobs). During a search the heartbeat runs every 15 s.
   setInterval(() => { if (running.size) void heartbeat(); }, 15_000);
-  let lastBell: number | null = null, hotUntil = 0, lastSweep = 0;
+  let lastBell: number | null = null, hotUntil = 0, lastSweep = 0, ringUntil = 0;
   const bell = async (): Promise<number | null> => {
     try {
       const r = await fetch(`${APP}/api/cron/bell`, { headers: { authorization: `Bearer ${config.cronSecret}` }, signal: AbortSignal.timeout(10_000) });
@@ -125,25 +125,26 @@ async function runOne(id: string, deep: boolean, researchMin?: number) {
     const rang = b !== null && lastBell !== null && b !== lastBell;
     if (b !== null) lastBell = b;
     const sweep = Date.now() - lastSweep > (b === null ? 5 : 30) * 60_000; // no doorbell: sweep every 5 min
-    // Neon bills every awake minute: while searches run (they keep it awake on their own) a new one is
-    // claimed only on the doorbell or the sweep, never by polling every few seconds
-    if (rang || sweep || (Date.now() < hotUntil && running.size === 0)) {
+    // Neon bills every awake minute: while searches run (they keep it awake on their own) new ones are
+    // looked for only for a minute after the doorbell rang and on the sweep, never by polling all along
+    if (rang) ringUntil = Date.now() + 60_000; // the ring may beat the insert's commit
+    if (sweep || Date.now() < ringUntil || (Date.now() < hotUntil && running.size === 0)) {
       if (sweep) lastSweep = Date.now();
       if (rang || sweep) await heartbeat();
-      // another search only with room for it: a free slot and the heap under half its limit
-      const roomy = process.memoryUsage().heapUsed < getHeapStatistics().heap_size_limit * 0.5;
-      const job = running.size < MAX_PARALLEL && (running.size === 0 || roomy) ? await claim().catch((e) => { console.error("claim", e.message); return null; }) : null;
-      if (job) {
+      // every waiting search that fits: a free slot and (beside a running one) the heap under half its limit
+      let took = 0;
+      while (running.size < MAX_PARALLEL && (running.size === 0 || process.memoryUsage().heapUsed < getHeapStatistics().heap_size_limit * 0.5)) {
+        const job = await claim().catch((e) => { console.error("claim", e.message); return null; });
+        if (!job) break;
+        took++;
         running.add(job.id);
         void runOne(job.id, job.deep, job.researchMin).catch((e) => console.error("search", job.id, e))
-          .finally(() => { running.delete(job.id); hotUntil = Date.now() + 2 * 60_000; });
-        hotUntil = Date.now() + 2 * 60_000;
-        continue;
+          .finally(() => { running.delete(job.id); hotUntil = Date.now() + 2 * 60_000; ringUntil = Date.now() + 60_000; }); // a freed slot: one minute of looking for a waiting search
       }
-      if (rang) hotUntil = Math.max(hotUntil, Date.now() + 60_000); // the ring may beat the insert's commit
+      if (took) { hotUntil = Date.now() + 2 * 60_000; continue; }
       // the nightly "anywhere cheap" list and other periodic jobs (they check their own schedule)
       if (sweep && !running.size) await nightlyJobs(pending).catch((e) => console.error("nightly", e));
     }
-    await sleep(Date.now() < hotUntil ? 3000 : 10_000);
+    await sleep(Date.now() < Math.max(hotUntil, ringUntil) ? 3000 : 10_000);
   }
 })();

@@ -66,7 +66,7 @@ function camera(map: MLMap): Cam | null {
 /** Projected polyline: screen x/y per sample and whether the sample is visible. */
 type Proj = { x: Float32Array; y: Float32Array; vis: Uint8Array; n: number };
 
-function project(cam: Cam, g: ArcGeom, out?: Proj): Proj {
+function project(cam: Cam, g: ArcGeom, out?: Proj, bend = 0): Proj {
   const n = g.pts.length;
   const p = out && out.x.length >= n ? out : { x: new Float32Array(n), y: new Float32Array(n), vis: new Uint8Array(n), n };
   p.n = n;
@@ -98,6 +98,21 @@ function project(cam: Cam, g: ArcGeom, out?: Proj): Proj {
       if (facing < 0.22) vis = 0;
     }
     p.vis[i] = vis;
+  }
+  // a sideways bow on screen (phone): an arc seen straight from above — a route through the middle of a
+  // narrow screen — has nothing to curve it, so it bends to the left of its direction by a share of its
+  // length; the way back runs the other direction and so bows to the other side
+  if (bend > 0 && n > 2 && g.angle > 0.004 && p.vis[0] && p.vis[n - 1]) {
+    const x0 = p.x[0], y0 = p.y[0], x1 = p.x[n - 1], y1 = p.y[n - 1];
+    const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
+    if (len > 4 && Number.isFinite(len)) {
+      const k = Math.min(len * bend, 90) / len; // the bow's height, capped on very long strokes
+      const nx = -dy * k, ny = dx * k;
+      for (let i = 1; i < n - 1; i++) {
+        const s = Math.sin((Math.PI * i) / (n - 1));
+        p.x[i] += nx * s; p.y[i] += ny * s;
+      }
+    }
   }
   return p;
 }
@@ -219,7 +234,9 @@ export class ArcCanvas {
     return best;
   }
 
-  private proj(g: ArcGeom) { this.buf = project(this.cam!, g, this.buf); return this.buf; }
+  /** Phone: the sideways bow of each arc, as a share of its on-screen length (0 on the laptop). */
+  bend = 0;
+  private proj(g: ArcGeom) { this.buf = project(this.cam!, g, this.buf, g.alt[g.alt.length >> 1] > 0 ? this.bend : 0); return this.buf; }
 
   /** Live search: the network of every route asked about grows on the globe (thin low lines, airports
    *  as nodes sized by how many routes meet there); the routes being asked right now fly over it as
