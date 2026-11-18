@@ -1,0 +1,39 @@
+name: world-map
+on:
+  schedule:
+    # every 4 hours: map batch (~5 min) + radar (feeds ~1 min, daily scan ~3 min): ~1300 min/month (quota 2000)
+    - cron: "7 */4 * * *"
+  workflow_dispatch: {}
+concurrency: { group: world-map, cancel-in-progress: false }
+jobs:
+  refresh:
+    # only for your own server: set the repository variable AZYMUT_MAP=1 and the secret DATABASE_URL
+    if: vars.AZYMUT_MAP == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Cache node_modules
+        id: nm
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: nm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.nm.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund --ignore-scripts
+      - name: Random start delay
+        run: sleep $((RANDOM % 45))
+      - name: Refresh one batch
+        run: npx tsx scripts/map-worker.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          MAP_WORKER_SECONDS: "270"
+      - name: Radar (history, deal feeds; anomaly scan and hub ranking once a day)
+        run: npx tsx scripts/radar-worker.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RADAR_SECONDS: "200"
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}

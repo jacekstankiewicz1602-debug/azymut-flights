@@ -1,0 +1,5 @@
+data-src
+.next
+node_modules
+.env
+public/cesium

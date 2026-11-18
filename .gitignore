@@ -1,0 +1,13 @@
+node_modules
+.next
+.env
+.env*.local
+.vercel
+data-src
+*.tsbuildinfo
+next-env.d.ts
+.env*
+public/cesium
+.claude
+.azymut/
+!.env.example

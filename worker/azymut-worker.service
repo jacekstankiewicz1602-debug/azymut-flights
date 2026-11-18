@@ -1,0 +1,16 @@
+[Unit]
+Description=Azymut search worker
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__DIR__
+ExecStart=/usr/bin/env npm run worker
+Restart=always
+RestartSec=20
+# keep the laptop responsive: the worker is the first to go under memory pressure
+MemoryMax=4G
+Nice=10
+
+[Install]
+WantedBy=default.target
