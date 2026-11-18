@@ -2,6 +2,7 @@
 // them without Vercel's time limits, from the home IP. Vercel only serves the UI and queues jobs.
 //   npm run worker            (env from .env.local + .env; see worker/README.md)
 import { hostname } from "node:os";
+import { getHeapStatistics } from "node:v8";
 import { execFile } from "node:child_process";
 import { config } from "../lib/config";
 import { sqlClient } from "../lib/db";
@@ -13,7 +14,9 @@ process.env.AZ_PHASELOG ??= "1";
 const ME = hostname(); // one row per laptop; a restarted worker takes over its own claims
 const APP = process.env.APP_URL || "http://localhost:3000";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-let current: string | null = null;
+// searches run side by side (each its own engine run; the sources' rate limits are shared)
+const MAX_PARALLEL = Math.max(1, Number(process.env.WORKER_CONCURRENCY || 3));
+const running = new Set<string>();
 
 /** Desktop notification (Linux notify-send) and, with RESEND_API_KEY + ALERT_EMAIL, a mail. */
 async function notify(subject: string, text: string) {
@@ -25,7 +28,7 @@ async function notify(subject: string, text: string) {
 async function heartbeat() {
   const sql = await sqlClient();
   if (!sql) return;
-  const info = { pid: process.pid, current, rssMb: Math.round(process.memoryUsage().rss / 1e6), version: 1 };
+  const info = { pid: process.pid, current: [...running][0] ?? null, running: [...running], rssMb: Math.round(process.memoryUsage().rss / 1e6), version: 2 };
   await sql`insert into workers (id, seen_at, info) values (${ME}, now(), ${sql.json(info as never)})
     on conflict (id) do update set seen_at = now(), info = excluded.info`.catch((e) => console.error("heartbeat", e.message));
 }
@@ -46,6 +49,7 @@ async function claim(): Promise<{ id: string; deep: boolean; researchMin?: numbe
   const [r] = await sql`update live_searches set claimed_by = ${ME}, updated_at = now(), message = 'worker: start'
     where id = (select id from live_searches where status = 'running' and runner = 'worker'
       and (claimed_by is null or claimed_by = ${ME} or updated_at < now() - interval '10 minutes')
+      and not (id = any(${[...running, ""]}))
       order by created_at limit 1 for update skip locked)
     returning id, params`;
   const pr = r?.params as { depth?: string; researchMin?: number } | undefined;
@@ -56,7 +60,6 @@ const fmt = (n: number) => Math.round(n).toLocaleString("pl-PL");
 
 async function runOne(id: string, deep: boolean, researchMin?: number) {
   const sql = (await sqlClient())!;
-  current = id;
   const t0 = Date.now();
   let alerted = false;
   console.log(`[search] ${id} ${deep ? `deep${researchMin ? ` ${researchMin} min` : ""}` : "fast"}`);
@@ -100,7 +103,6 @@ async function runOne(id: string, deep: boolean, researchMin?: number) {
       }
     }
   } finally { clearInterval(watch); }
-  current = null;
 }
 
 (async () => {
@@ -110,7 +112,7 @@ async function runOne(id: string, deep: boolean, researchMin?: number) {
   // query it: it reads the doorbell on Vercel (rung when a worker search is queued) and touches the
   // database only when it rings, for 10 minutes after a search, and in a sweep every 30 minutes
   // (heartbeat, missed rings, nightly jobs). During a search the heartbeat runs every 15 s.
-  setInterval(() => { if (current) void heartbeat(); }, 15_000);
+  setInterval(() => { if (running.size) void heartbeat(); }, 15_000);
   let lastBell: number | null = null, hotUntil = 0, lastSweep = 0;
   const bell = async (): Promise<number | null> => {
     try {
@@ -126,15 +128,19 @@ async function runOne(id: string, deep: boolean, researchMin?: number) {
     if (rang || sweep || Date.now() < hotUntil) {
       if (sweep) lastSweep = Date.now();
       if (rang || sweep) await heartbeat();
-      const job = await claim().catch((e) => { console.error("claim", e.message); return null; });
+      // another search only with room for it: a free slot and the heap under half its limit
+      const roomy = process.memoryUsage().heapUsed < getHeapStatistics().heap_size_limit * 0.5;
+      const job = running.size < MAX_PARALLEL && (running.size === 0 || roomy) ? await claim().catch((e) => { console.error("claim", e.message); return null; }) : null;
       if (job) {
-        await runOne(job.id, job.deep, job.researchMin).catch((e) => console.error("search", job.id, e));
+        running.add(job.id);
+        void runOne(job.id, job.deep, job.researchMin).catch((e) => console.error("search", job.id, e))
+          .finally(() => { running.delete(job.id); hotUntil = Date.now() + 10 * 60_000; });
         hotUntil = Date.now() + 10 * 60_000;
         continue;
       }
       if (rang) hotUntil = Math.max(hotUntil, Date.now() + 60_000); // the ring may beat the insert's commit
       // the nightly "anywhere cheap" list and other periodic jobs (they check their own schedule)
-      if (sweep) await nightlyJobs(pending).catch((e) => console.error("nightly", e));
+      if (sweep && !running.size) await nightlyJobs(pending).catch((e) => console.error("nightly", e));
     }
     await sleep(Date.now() < hotUntil ? 3000 : 10_000);
   }
