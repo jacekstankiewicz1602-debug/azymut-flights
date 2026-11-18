@@ -65,6 +65,8 @@ type Live = {
 };
 
 let poll: ReturnType<typeof setTimeout> | null = null;
+/** The last search started in this browser (stopped when the next one starts). */
+const LAST_KEY = "azymut-last-search";
 
 /** Start a resumable background search and follow it (the server keeps going in ~165 s steps). */
 async function runSearch(params: SearchParams) {
@@ -75,10 +77,15 @@ async function runSearch(params: SearchParams) {
   void fetch("/api/search/estimate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(params) })
     .then((r) => (r.ok ? r.json() : null)).then((e) => e && setState({ estimate: e })).catch(() => {});
   try { if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission(); } catch { /* unsupported */ }
+  // a new search from this browser replaces the one it started before (still running or not: the
+  // server stops only a running one), so an old search never holds the worker for nothing
+  const prev = (() => { try { return localStorage.getItem(LAST_KEY); } catch { return null; } })();
+  if (prev) await fetch("/api/search/stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: prev }) }).catch(() => null);
   const res = await fetch("/api/search/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(params) });
   if (res.status === 401) { location.href = "/login"; return; }
   const { id, error } = await res.json();
   if (!id) { setState({ phase: "error", message: error ?? "Nie udało się uruchomić wyszukiwania" }); return; }
+  try { localStorage.setItem(LAST_KEY, id); } catch { /* private mode */ }
   followed = id;
   history.pushState(null, "", `#s=${id}`);
   follow(id);
@@ -1038,16 +1045,18 @@ function Results() {
       setTimeout(() => document.getElementById(`dc-${cc}`)?.scrollIntoView({ block: "start", behavior: "smooth" }), 80);
       return;
     }
-    // a city pin: that city's own full search (see searchCity)
+    // a city pin: the routes to that city this search found (a deeper search of the city is a button there)
     const d = rows.find((x) => x.city === tripCity(pinPick));
     setState({ pinPick: null, panelOpen: true, selected: null });
-    if (d) void searchCity(d.city, d.code);
+    if (d) { setCity(d.city); setView("all"); }
   }, [pinPick, destPins, countries, rows]);
   if (phase === "idle" || pins) return null;
   const n = r?.trips.length ?? 0;
   const shown = r ? r.trips.map((t, i) => ({ t, i })).filter(({ t }) => !city || destCity(t) === city) : [];
-  // a city of a region: its own full search; the trips found so far are under "wszystkie trasy"
-  const pick = (c: string) => { const d = rows.find((x) => x.city === c); if (d) void searchCity(c, d.code); };
+  // a city of a region: the routes to it found so far, at once (no new search: after "Zatrzymaj" the
+  // result stays the result); "Szukaj dokładniej" runs that city's own full search
+  const pick = (c: string) => { setCity(c); setView("all"); setState({ selected: null }); };
+  const deeper = (c: string) => { const d = rows.find((x) => x.city === c); if (d) void searchCity(c, d.code); };
   return (
     <section className={`results glass ${open ? "open" : "closed"}`} aria-label={tr("Wyniki")} hidden={journey !== "none" && !inline}>
       <button className="r-handle" onClick={() => setState((s) => ({ panelOpen: !s.panelOpen }))} aria-expanded={open}>
@@ -1073,6 +1082,10 @@ function Results() {
             )}
             {multi && view === "dest" ? <Destinations rows={rows} pax={pax} onPick={pick} countries={countries} openCc={openCc} setOpenCc={setOpenCc} /> : <>
               {city && <div className="r-filter"><Icon name="pin" /><span>{tr("Trasy do:")} <b>{city}</b> · {shown.length}</span><button onClick={() => { setCity(null); setState({ selected: null }); }}>{tr("wszystkie miasta")}</button></div>}
+              {city && multi && <div className="r-deeper">
+                {!shown.length && <span>{tr("Tej trasy nie ma na liście najlepszych wyników.")}</span>}
+                <button className="link" onClick={() => deeper(city)}>{tr("Szukaj dokładniej: {city}", { city })} →</button>
+              </div>}
               {/* the cheapest, then (when it needs separate bookings) the cheapest on one ticket, then the rest */}
               <ol className="trips">
                 {shown.slice(0, 1).map(({ t, i }) => <TripCard key={t.id} t={t} i={i} r={r} pax={pax} anywhere={anywhere || (multi && !city)} best={i === 0} />)}

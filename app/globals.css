@@ -940,3 +940,5 @@ li.open > .any-row, li.open > .dest { background: var(--sunken); }
   .pg-left { font-size: 20px; }
   .maplibregl-ctrl-bottom-right { display: none; }
 }
+.r-deeper { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: -4px 4px 10px; font-size: 13.5px; color: var(--ink-3); }
+.r-deeper .link { font-size: 13.5px; }

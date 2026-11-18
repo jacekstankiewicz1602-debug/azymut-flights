@@ -11,3 +11,5 @@ public/cesium
 .claude
 .azymut/
 !.env.example
+.azymut-restart.sh
+.azymut-busy.ts
