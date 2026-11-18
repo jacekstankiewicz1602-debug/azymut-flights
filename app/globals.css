@@ -942,3 +942,124 @@ li.open > .any-row, li.open > .dest { background: var(--sunken); }
 }
 .r-deeper { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: -4px 4px 10px; font-size: 13.5px; color: var(--ink-3); }
 .r-deeper .link { font-size: 13.5px; }
+
+/* ---------------- phone v3: map first, a sheet with three heights, tabs at the bottom ----------------
+   Apple Maps / Airbnb pattern. Only below 720 px; the desktop layout is untouched. */
+@media (max-width: 720px) {
+  :root { --tab-h: 60px; --sab: env(safe-area-inset-bottom, 0px); --sat: env(safe-area-inset-top, 0px); }
+  html, body { height: 100dvh; overscroll-behavior: none; }
+
+  /* top: the search as one pill, the menu next to it */
+  .top.ph-top { top: calc(var(--sat) + 10px); left: 12px; right: 12px; gap: 0; transition: opacity .3s var(--ease), transform .4s var(--spring); }
+  .top.ph-top.under-sheet { opacity: 0; transform: translateY(-16px); pointer-events: none; }
+  .top.ph-top.under-sheet > * { pointer-events: none; }
+  .ph-bar { display: flex; gap: 8px; align-items: center; }
+  .ph-pill { flex: 1; min-width: 0; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 18px; border-radius: 999px;
+    background: var(--surface-strong); box-shadow: var(--shadow-2); outline: 1px solid var(--line); outline-offset: -1px;
+    font-size: 15.5px; font-weight: 600; color: var(--ink); text-align: left; -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+  .ph-pill > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ph-pill svg { width: 19px; height: 19px; flex: none; color: var(--accent-ink); }
+  .ph-pill .ph-pill-empty { color: var(--ink-2); font-weight: 500; font-size: 16px; }
+  .ph-round { width: 52px; height: 52px; flex: none; border-radius: 999px; display: grid; place-items: center; background: var(--surface-strong);
+    box-shadow: var(--shadow-2); outline: 1px solid var(--line); outline-offset: -1px; color: var(--ink); }
+  .ph-round svg { width: 21px; height: 21px; }
+  .ph-round.flat { width: 44px; height: 44px; box-shadow: none; outline: 0; background: var(--sunken); }
+  :root[data-theme="dark"] .ph-round.flat { background: rgba(255, 255, 255, 0.07); }
+
+  /* the full form takes the whole screen (Airbnb search), closes after "Szukaj" */
+  .ph-form { position: fixed; inset: 0; z-index: 40; background: var(--bg); padding: calc(var(--sat) + 8px) 14px calc(var(--sab) + 16px); overflow-y: auto;
+    overscroll-behavior: contain; animation: fadeIn .22s var(--ease) both; }
+  .ph-form .topform { width: 100%; padding: 0; background: transparent; box-shadow: none; outline: 0; border: 0; -webkit-backdrop-filter: none; backdrop-filter: none; animation: none; }
+  .ph-form .f-row1 { margin-bottom: 14px; gap: 8px; }
+  .ph-form .f-row1 .seg button { min-height: 40px; font-size: 14.5px; }
+  .ph-form .f-inline select { min-height: 44px; font-size: 15px; }
+  .ph-form .more-btn { min-height: 44px; min-width: 44px; }
+  .ph-form .f-row2 { flex-direction: column; gap: 10px; flex-wrap: nowrap; }
+  .ph-form .f-place, .ph-form .f-dates { flex: none; width: 100%; }
+  .ph-form .f-field { padding: 10px 16px 12px; min-height: 64px; }
+  .ph-form .f-field input, .ph-form .f-datebtn { font-size: 17px; }
+  .ph-form .swap { align-self: flex-end; margin: -27px 18px -27px 0; transform: rotate(90deg); width: 40px; height: 40px; }
+  .ph-form .topform .btn.primary { min-height: 56px; font-size: 17px; border-radius: var(--r-md); }
+  .ph-form .f-strict { top: 10px; right: 12px; font-size: 13px; padding: 4px 8px; }
+  .ph-form .f-strict input { width: 16px; height: 16px; }
+  .ph-form .datepanel { top: calc(var(--sat) + 8px); }
+  .ph-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; margin-bottom: 10px; }
+  .ph-title { font-size: 21px; font-weight: 700; color: var(--ink); }
+  .ph-logo { font-size: 18px; font-weight: 750; letter-spacing: 0.14em; color: var(--ink); }
+
+  /* menu and "Ostatnie": bottom sheets over a scrim */
+  .ph-scrim { position: fixed; inset: 0; z-index: 50; background: rgba(4, 7, 12, 0.45); display: flex; align-items: flex-end; animation: fadeIn .2s var(--ease) both; }
+  .ph-menu, .ph-sheet-panel { width: 100%; background: var(--panel); border-radius: 22px 22px 0 0; padding: 12px 18px calc(var(--sab) + 18px); box-shadow: var(--shadow-3);
+    animation: phUp .38s var(--spring) both; }
+  @keyframes phUp { from { transform: translateY(100%); } to { transform: none; } }
+  .ph-sheet-panel { max-height: 82dvh; display: flex; flex-direction: column; }
+  .ph-sheet-scroll { overflow-y: auto; overscroll-behavior: contain; margin: 0 -8px; }
+  .ph-menu-row { display: flex; align-items: center; justify-content: space-between; min-height: 60px; font-size: 16.5px; color: var(--ink); border-top: 1px solid var(--line); }
+  .ph-menu .theme-switch { margin: 0; }
+  .ph-menu .theme-switch button { min-height: 40px; padding: 6px 14px; font-size: 15px; }
+  .ph-menu .theme-switch button span { display: inline; }
+  .ph-sheet-panel .rc-item { min-height: 64px; font-size: 16px; padding: 10px 12px; }
+  .ph-sheet-panel .rc-label { font-size: 16px; }
+  .ph-sheet-panel .rc-empty { font-size: 16px; padding: 16px 12px; }
+
+  /* tabs */
+  .ph-tabs { position: fixed; z-index: 14; left: 0; right: 0; bottom: 0; height: calc(var(--tab-h) + var(--sab)); padding-bottom: var(--sab); display: flex;
+    background: var(--surface-strong); border-top: 1px solid var(--line); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+  .ph-tabs button { flex: 1; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    font-size: 12px; font-weight: 600; color: var(--ink-2); }
+  .ph-tabs svg { width: 23px; height: 23px; }
+  .ph-tabs button.on { color: var(--accent-ink); }
+  .results.anyc, .radar { bottom: calc(var(--tab-h) + var(--sab)) !important; }
+
+  /* the results sheet: peek (best price) / half (the list) / full (details) */
+  .results.ph-sheet { position: fixed; top: auto; left: 0; right: 0; bottom: calc(var(--tab-h) + var(--sab)); width: auto; max-height: none; z-index: 13;
+    border-radius: 22px 22px 0 0; display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0;
+    transition: height .55s var(--spring); animation: phUp .5s var(--spring) both; }
+  .results.ph-sheet.sheet-peek { height: 116px; }
+  .results.ph-sheet.sheet-half { height: 50dvh; }
+  .results.ph-sheet.sheet-full { height: calc(100dvh - var(--tab-h) - var(--sab) - var(--sat) - 10px); }
+  .ph-handle { flex: none; position: relative; display: block; padding: 24px 18px 16px; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .ph-handle .r-grip { display: block; position: absolute; left: 50%; top: 9px; width: 40px; height: 5px; margin-left: -20px; border-radius: 99px; background: var(--line-2); }
+  .pk { display: flex; align-items: center; gap: 14px; min-height: 60px; }
+  .pk-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .pk-city { font-size: 20px; font-weight: 700; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pk-sub { display: flex; align-items: center; gap: 7px; font-size: 15px; color: var(--ink-2); }
+  .pk-dot { width: 8px; height: 8px; border-radius: 99px; background: var(--accent); flex: none; animation: term-ping 1.6s ease-out infinite; }
+  .pk-right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex: none; }
+  .pk-price { font-size: 28px; font-weight: 750; letter-spacing: -0.02em; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1; }
+  .pk-save { font-size: 13px; font-weight: 650; color: var(--ok); background: var(--ok-soft); padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .ph-sheet .r-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 24px; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+
+  /* readability: one sans face, no spaced capitals, larger text and touch targets */
+  .f-label, .pg-k, .tr-badge, .caps, .ddir, .r-handle .mono, .fd-src, .term-bar, .wordmark { font-family: var(--sans); text-transform: none; letter-spacing: 0; }
+  .f-label, .pg-k, .tr-badge { font-size: 13.5px; font-weight: 600; }
+  .tr-price, .pg-v.big, .pg-left, .pg-ring span { font-family: var(--sans); letter-spacing: -0.02em; font-weight: 750; }
+  .trips > li.best .tr-price { font-size: 32px; }
+  .trips > li:not(.best) .tr-price, .reasonable .tr-price { font-size: 22px; }
+  .pg-prices .pg-v.big { font-size: 28px; }
+  .trip, .tr-meta, .r-note, .r-summary, .pg-gap, .pg-msg, .tl, .dests, .r-filter, .r-deeper { font-size: 16px; }
+  .term, .pg-src, .pg-foot, .pg-note { display: none; }
+  .dests li > button, .any-city { min-height: 64px; }
+  .r-filter button, .r-deeper .link, .tr-step button, .pg-stop { min-height: 44px; }
+  .progress { padding: 14px; }
+  .maplibregl-ctrl-bottom-right { display: none; }
+}
+@media (max-width: 720px) {
+  /* a finished search: the sheet's top line and the best card already say the price; keep only the verdict */
+  .ph-sheet .progress.is-done { padding: 10px 14px; }
+  .ph-sheet .progress.is-done .pg-top, .ph-sheet .progress.is-done .pg-prices { display: none; }
+  .ph-sheet .progress.is-done .pg-gap { margin: 0; }
+  .ph-sheet .progress.is-done .pg-warn { margin-top: 6px; }
+  .f-strict { font-family: var(--sans); text-transform: none; letter-spacing: 0; }
+  .tr-bag, .tr-google, .tr-save, .tr-meta, .tr-route, .tr-access, .tr-abroad { font-size: 14.5px; }
+  .tr-route .code { font-size: 15px; }
+  /* the full-screen form: options two to a row, nothing cut */
+  .ph-form .f-row1 .f-inline { flex: 1 1 calc(50% - 4px); }
+  .ph-form .f-row1 .more-btn { flex: 1 1 calc(50% - 4px); font-size: 15px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .ph-form .f-row1 .more-btn::after { margin-left: 6px; }
+}
+@media (max-width: 720px) {
+  /* the sheet's top line already carries the best price and the saving */
+  .ph-sheet .progress .pg-prices { display: none; }
+  .ph-handle:focus-visible { outline-offset: -3px; border-radius: 22px 22px 0 0; }
+}

@@ -8,7 +8,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import type { Trip, TripLeg } from "@/lib/engine";
 import { AIRPORT_POS, fmtDur, fmtPln, fmtTime, gcKm } from "../geo";
-import { getState, liveArcs, markBest, setState, subscribe, touchArc } from "../store";
+import { getState, isPhone, liveArcs, markBest, setState, sheetPx, sheetSnap, subscribe, TAB_H, touchArc } from "../store";
 import { carrierCode, cityOf, connBefore, days, logoUrl, svg, ticketOf } from "../trip-info";
 import { locale, t as tr, useLang } from "../i18n";
 import { ArcCanvas, arcGeom, type ArcGeom, type Colors, type LegDraw, type LiveDraw } from "./arcs";
@@ -77,6 +77,16 @@ function timeline(trip: Trip): Seg[] {
   });
   segs.push({ kind: "final", start: t, dur: 3.5 });
   return segs;
+}
+
+/** Phone: camera padding so the map's centre is the free area — below the search pill, above the
+ *  results sheet (its snap height) and the tab bar; nothing under a full sheet or during a journey. */
+function phonePad(s: ReturnType<typeof getState>) {
+  const journey = s.journeyPhase !== "none" && !s.journeyInline;
+  const top = journey ? 0 : 76;
+  const sheet = s.pins !== null ? Math.round(window.innerHeight * 0.55)
+    : journey || s.phase === "idle" ? 0 : Math.min(sheetPx(sheetSnap(s)), Math.round(window.innerHeight * 0.55));
+  return { top, right: 0, bottom: (journey ? 0 : TAB_H) + sheet, left: 0 };
 }
 
 function readTheme(): Theme {
@@ -224,8 +234,10 @@ class EarthController {
     const anyList = s.pins !== null && s.journeyPhase === "none";
     const calm = s.journeyPhase === "none" || s.journeyInline; // the form and the list are on screen
     const panel = wide && calm && (s.phase !== "idle" || anyList) && s.panelOpen;
-    // phone: the "gdziekolwiek tanio" sheet covers the lower ~58%; the globe sits above it
-    const pad = { top: wide && calm ? 150 : 0, right: panel ? 460 : 0, bottom: !wide && anyList && s.panelOpen ? Math.round(window.innerHeight * 0.55) : 0, left: 0 };
+    // phone: the globe sits in the free area between the search pill and the sheet over the tab bar
+    // (the "gdziekolwiek tanio" sheet covers the lower ~58%)
+    const pad = isPhone() ? phonePad(s)
+      : { top: wide && calm ? 150 : 0, right: panel ? 460 : 0, bottom: !wide && anyList && s.panelOpen ? Math.round(window.innerHeight * 0.55) : 0, left: 0 };
     const cur = this.map.getPadding();
     if (cur.top !== pad.top || cur.right !== pad.right || cur.bottom !== pad.bottom) {
       if (this.map.isMoving() || s.phase !== this.lastPhase || (!!s.pins && !this.lastPins)) this.map.setPadding(pad);
@@ -298,7 +310,8 @@ class EarthController {
     const b = new maplibregl.LngLatBounds(pts[0], pts[0]);
     for (const p of pts) b.extend(p);
     const wide = window.innerWidth > 900;
-    this.map.fitBounds(b, { padding: wide ? { top: 90, bottom: 70, left: 70, right: 150 } : { top: 70, bottom: getState().panelOpen ? Math.round(window.innerHeight * 0.5) : 90, left: 30, right: 90 }, maxZoom: 5, pitch: 0, bearing: 0, duration: 1600, essential: true });
+    // phone: the camera padding already keeps the pill and the sheet free; a margin around the route
+    this.map.fitBounds(b, { padding: wide ? { top: 90, bottom: 70, left: 70, right: 150 } : isPhone() ? { top: 40, bottom: 40, left: 36, right: 36 } : { top: 70, bottom: getState().panelOpen ? Math.round(window.innerHeight * 0.5) : 90, left: 30, right: 90 }, maxZoom: 5, pitch: 0, bearing: 0, duration: 1600, essential: true });
     this.lastFocus = null;
   }
 
@@ -316,7 +329,7 @@ class EarthController {
     const b = new maplibregl.LngLatBounds(pts[0], pts[0]);
     for (const p of pts) b.extend(p);
     const narrow = window.innerWidth < 720;
-    this.map.fitBounds(b, { padding: narrow ? 40 : { top: 60, bottom: 60, left: 60, right: 60 }, maxZoom: 4, duration: 2400, essential: true, pitch: 0, bearing: 0 });
+    this.map.fitBounds(b, { padding: narrow ? 30 : { top: 60, bottom: 60, left: 60, right: 60 }, maxZoom: 4, duration: 2400, essential: true, pitch: 0, bearing: 0 });
   }
 
   /** Search visualisation: every route asked about stays as a low line of the growing network; the

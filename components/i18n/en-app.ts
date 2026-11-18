@@ -1,5 +1,14 @@
 // English for the Polish UI text (t("…")); keys are the Polish strings exactly as written in the code.
 export const EN_APP: Record<string, string> = {
+  "Dokąd lecisz?": "Where to?",
+  "{n} os.": "{n} pax",
+  "Menu": "Menu",
+  "Zamknij": "Close",
+  "Wyszukiwanie": "Search",
+  "Nawigacja": "Navigation",
+  "Gdziekolwiek": "Anywhere",
+  "Brak trasy": "No route",
+  "vs Google": "vs Google",
   "Tej trasy nie ma na liście najlepszych wyników.": "This route is not among the top results.",
   "Szukaj dokładniej: {city}": "Search {city} in depth",
   // status line (kept in Polish in the store, translated for display via tx())

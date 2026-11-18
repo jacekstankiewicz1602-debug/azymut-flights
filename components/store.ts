@@ -26,6 +26,8 @@ export type State = {
   journeyInline: boolean;
   journeyTotal: number;     // running price counter
   panelOpen: boolean;
+  /** Phone: how far the results sheet is pulled up while open (closed = peek). */
+  sheet: "half" | "full";
   live: {
     gap: number | null; lowerBound: number | null; elapsed: number; steps: number; status: string;
     runner?: string; worker?: { online: boolean; busyWith?: string | null } | null;
@@ -51,7 +53,7 @@ export type Pin = { code: string; price: number; color: string; deal: boolean; v
 const initial: State = {
   phase: "idle", message: "", params: null, parseVia: null, problems: [], sources: null,
   stats: { paid: 0, free: 0, costUsd: 0, checked: 0, pruned: 0, best: null },
-  best: null, result: null, selected: null, journeyKey: 0, journeyPhase: "none", journeyInline: false, journeyTotal: 0, panelOpen: true, live: null, calendar: {}, pins: null, pinPick: null, destPins: null, focusLeg: null, estimate: null, feed: [],
+  best: null, result: null, selected: null, journeyKey: 0, journeyPhase: "none", journeyInline: false, journeyTotal: 0, panelOpen: true, sheet: "half", live: null, calendar: {}, pins: null, pinPick: null, destPins: null, focusLeg: null, estimate: null, feed: [],
 };
 
 let state: State = initial;
@@ -86,3 +88,18 @@ export function markBest(nodes: string[]) {
   for (const a of liveArcs.values()) if (a.state === "best") { a.state = "ok"; a.t = performance.now(); }
   for (let i = 0; i < nodes.length - 1; i++) if (nodes[i] !== nodes[i + 1]) touchArc(nodes[i], nodes[i + 1], "best");
 }
+
+// ---------------------------------------------------------------- phone layout
+
+/** Phone layout below this width (the desktop layout is untouched above it). */
+export const PHONE_MAX = 720;
+export const isPhone = () => typeof window !== "undefined" && window.innerWidth <= PHONE_MAX;
+export function useIsPhone(): boolean {
+  return useSyncExternalStore((f) => { window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, isPhone, () => false);
+}
+/** Bottom tab bar and the collapsed sheet (px, above the safe area). */
+export const TAB_H = 60;
+export const PEEK_H = 116;
+/** Phone: the sheet's snap position for a state (closed panel = peek). */
+export const sheetSnap = (s: Pick<State, "panelOpen" | "sheet">): "peek" | "half" | "full" => (!s.panelOpen ? "peek" : s.sheet);
+export const sheetPx = (snap: "peek" | "half" | "full") => (snap === "peek" ? PEEK_H : snap === "half" ? Math.round(window.innerHeight * 0.5) : window.innerHeight);

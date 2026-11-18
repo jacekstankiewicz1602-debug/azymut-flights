@@ -7,7 +7,7 @@ import { AIRPORT_POS, ccOf, countryName, fmtDate, fmtPln, fmtTime } from "./geo"
 import { SearchFormPanel, toSearchForm, type FormState } from "./Form";
 import { AnywherePanel, openAnywhere } from "./Anywhere";
 import { feedLine, type FeedLine } from "./feed";
-import { getState, liveArcs, markBest, resetSearch, setState, touchArc, useStore, type Pin, type State, type Stats } from "./store";
+import { getState, liveArcs, markBest, PEEK_H, resetSearch, setState, sheetPx, sheetSnap, touchArc, useIsPhone, useStore, type Pin, type State, type Stats } from "./store";
 import { enablePush, pushState, refreshPush, type PushState } from "./push";
 import { locale, plural as plu, setLang, storedLang, t as tr, tx, useLang } from "./i18n";
 import { bagOf, bookings, plural, carrierCode, cityOf as tripCity, connBefore, dur, ICONS, isGround as groundLeg, isOneTicket, logoUrl, ticketNumbers } from "./trip-info";
@@ -282,34 +282,101 @@ const ago = (iso: string) => {
 };
 
 /** "Ostatnie": the latest searches, one click back to any of them. */
+function useRecentItems(open: boolean) {
+  const [items, setItems] = useState<RecentItem[] | null>(null);
+  useEffect(() => {
+    if (open) void fetch("/api/search/recent").then((r) => (r.ok ? r.json() : null)).then((d) => d && setItems(d.items)).catch(() => {});
+  }, [open]);
+  return items;
+}
+
+function RecentList({ items, onGo }: { items: RecentItem[] | null; onGo: (id: string) => void }) {
+  if (!items) return <p className="rc-empty">{tr("Wczytuję…")}</p>;
+  if (!items.length) return <p className="rc-empty">{tr("Brak wyszukiwań.")}</p>;
+  return <>{items.map((it) => (
+    <button key={it.id} role="menuitem" className={`rc-item ${it.id === followed ? "on" : ""}`} onClick={() => onGo(it.id)}>
+      <span className={`rc-dot st-${it.status}`} />
+      <span className="rc-label">{tx(it.label)}{it.deep ? <em> · research</em> : null}</span>
+      <span className="rc-price mono">{it.price ? fmtPln(it.price) : it.status === "running" ? tr("szuka…") : "—"}</span>
+      <span className="rc-ago">{ago(it.at)}</span>
+    </button>
+  ))}</>;
+}
+
+const goSearch = (id: string) => { if (id !== followed) location.hash = `s=${id}`; };
+
 function Recent() {
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<RecentItem[] | null>(null);
+  const items = useRecentItems(open);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    void fetch("/api/search/recent").then((r) => (r.ok ? r.json() : null)).then((d) => d && setItems(d.items)).catch(() => {});
     const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", close); document.addEventListener("keydown", esc);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
   }, [open]);
-  const go = (id: string) => { setOpen(false); if (id !== followed) location.hash = `s=${id}`; };
   return (
     <div className="recent" ref={ref}>
       <button className={`radar-btn ${open ? "on" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu">{tr("Ostatnie")} <Icon name="chevron" className="ico chev" /></button>
-      {open && <div className="recent-menu glass" role="menu">
-        {!items ? <p className="rc-empty">{tr("Wczytuję…")}</p> : !items.length ? <p className="rc-empty">{tr("Brak wyszukiwań.")}</p> : items.map((it) => (
-          <button key={it.id} role="menuitem" className={`rc-item ${it.id === followed ? "on" : ""}`} onClick={() => go(it.id)}>
-            <span className={`rc-dot st-${it.status}`} />
-            <span className="rc-label">{tx(it.label)}{it.deep ? <em> · research</em> : null}</span>
-            <span className="rc-price mono">{it.price ? fmtPln(it.price) : it.status === "running" ? tr("szuka…") : "—"}</span>
-            <span className="rc-ago">{ago(it.at)}</span>
-          </button>
-        ))}
-      </div>}
+      {open && <div className="recent-menu glass" role="menu"><RecentList items={items} onGo={(id) => { setOpen(false); goSearch(id); }} /></div>}
     </div>
   );
+}
+
+// ---------------------------------------------------------------- phone chrome
+// Phone (≤ 720 px): the map fills the screen; on top a pill with the search (tap: the full form), a menu
+// for theme and language, at the bottom the tabs and above them the results sheet (see Results).
+
+/** "Poznań → Islandia · 23.12–31.12 · 1 os." */
+function searchSummary(p: SearchParams | null): string {
+  if (!p) return tr("Dokąd lecisz?");
+  const d = (iso?: string) => (iso ? fmtDate(iso) : "");
+  const dates = p.dateFrom ? `${d(p.dateFrom)}${p.dateTo && p.dateTo !== p.dateFrom ? `–${d(p.dateTo)}` : ""}` : "";
+  return [`${p.originLabel} → ${p.destLabel}`, dates, tr("{n} os.", { n: p.pax ?? 1 })].filter(Boolean).join(" · ");
+}
+
+function PhoneMenu() {
+  const [open, setOpen] = useState(false);
+  return <>
+    <button className="ph-round" onClick={() => setOpen(true)} aria-label={tr("Menu")}><Icon name="menu" className="" /></button>
+    {open && <div className="ph-scrim" onClick={() => setOpen(false)}>
+      <div className="ph-menu" role="dialog" aria-label={tr("Menu")} onClick={(e) => e.stopPropagation()}>
+        <div className="ph-menu-head"><span className="ph-logo">Azymut</span>
+          <button className="ph-round flat" onClick={() => setOpen(false)} aria-label={tr("Zamknij")}><Icon name="close" className="" /></button></div>
+        <div className="ph-menu-row"><span>{tr("Motyw")}</span><ThemeSwitch /></div>
+        <div className="ph-menu-row"><span>{tr("Język")}</span><LangSwitch /></div>
+      </div>
+    </div>}
+  </>;
+}
+
+function PhoneRecent({ close }: { close: () => void }) {
+  const items = useRecentItems(true);
+  return (
+    <div className="ph-scrim" onClick={close}>
+      <div className="ph-sheet-panel" role="dialog" aria-label={tr("Ostatnie")} onClick={(e) => e.stopPropagation()}>
+        <div className="ph-menu-head"><span className="ph-title">{tr("Ostatnie")}</span>
+          <button className="ph-round flat" onClick={close} aria-label={tr("Zamknij")}><Icon name="close" className="" /></button></div>
+        <div className="ph-sheet-scroll" role="menu"><RecentList items={items} onGo={(id) => { close(); goSearch(id); }} /></div>
+      </div>
+    </div>
+  );
+}
+
+function PhoneTabs() {
+  const [recent, setRecent] = useState(false);
+  const radar = useRadarOpen();
+  const journey = useStore((s) => s.journeyPhase !== "none" && !s.journeyInline);
+  if (journey) return null;
+  return <>
+    <nav className="ph-tabs" aria-label={tr("Nawigacja")}>
+      <button className={recent ? "on" : ""} onClick={() => setRecent(true)}><Icon name="clock" className="" /><span>{tr("Ostatnie")}</span></button>
+      <button onClick={() => { setRadar(false); openAnywhere(); }}><Icon name="globe" className="" /><span>{tr("Gdziekolwiek")}</span></button>
+      <button className={radar ? "on" : ""} onClick={() => setRadar(!radar)}><Icon name="radar" className="" /><span>{tr("Radar okazji")}</span></button>
+    </nav>
+    {recent && <PhoneRecent close={() => setRecent(false)} />}
+  </>;
 }
 
 function Counter({ value, decimals = 0 }: { value: number; decimals?: number }) {
@@ -420,7 +487,7 @@ function Progress() {
   const queries = srcs.reduce((n, [, v]) => n + v, 0) || s.free + s.paid;
   const cheaper = prelim !== null && best !== null && best < prelim;
   return (
-    <div className="progress">
+    <div className={`progress ${running ? "is-running" : "is-done"}`}>
       <div className="pg-top">
         <div className={`pg-msg ${running ? "pulse" : ""} ${phase === "error" ? "err" : ""}`}>{friendly(message, prelim !== null ? prelim * pax : null, cheaper, running)}</div>
         {live?.status === "running" && !anywhere && <button className="pg-stop" onClick={() => void stopSearch()}>{tr("Zatrzymaj i pokaż wynik")}</button>}
@@ -1004,6 +1071,81 @@ function Destinations({ rows, pax, onPick, countries, openCc, setOpenCc }: { row
   );
 }
 
+/** Phone: tap on the handle steps peek → half → full → peek. */
+function stepSheet() {
+  setState((s) => (!s.panelOpen ? { panelOpen: true, sheet: "half" } : s.sheet === "half" ? { sheet: "full" } : { panelOpen: false }));
+}
+
+/** Phone: the results sheet follows the finger and springs to the nearest of peek / half / full
+ *  (where the flick would carry it); a tap without a drag steps it like the keyboard. */
+function useSheetDrag() {
+  const sheetRef = useRef<HTMLElement>(null);
+  const st = useRef<{ y: number; h: number; t: number; moved: boolean; id: number } | null>(null);
+  const maxH = () => (sheetRef.current?.parentElement?.clientHeight ?? window.innerHeight) - 56;
+  const drag = {
+    onPointerDown: (e: React.PointerEvent) => {
+      const el = sheetRef.current;
+      if (!el) return;
+      st.current = { y: e.clientY, h: el.getBoundingClientRect().height, t: performance.now(), moved: false, id: e.pointerId };
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const d = st.current, el = sheetRef.current;
+      if (!d || !el) return;
+      const dy = e.clientY - d.y;
+      if (!d.moved && Math.abs(dy) < 6) return;
+      if (!d.moved) { d.moved = true; if (!getState().panelOpen) setState({ panelOpen: true, sheet: "half" }); }
+      el.style.transition = "none";
+      el.style.height = `${Math.max(PEEK_H * 0.7, Math.min(maxH(), d.h - dy))}px`;
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      const d = st.current, el = sheetRef.current;
+      st.current = null;
+      if (!d || !el) return;
+      if (!d.moved) { stepSheet(); return; }
+      const dy = e.clientY - d.y, v = dy / Math.max(16, performance.now() - d.t); // px per ms, + = down
+      const aim = d.h - dy - v * 220;
+      const snaps: ["peek" | "half" | "full", number][] = [["peek", PEEK_H], ["half", sheetPx("half")], ["full", maxH()]];
+      const to = snaps.reduce((a, b) => (Math.abs(b[1] - aim) < Math.abs(a[1] - aim) ? b : a))[0];
+      el.style.height = `${el.getBoundingClientRect().height}px`;
+      requestAnimationFrame(() => { el.style.transition = ""; el.style.height = ""; });
+      setState(to === "peek" ? { panelOpen: false } : { panelOpen: true, sheet: to });
+    },
+    onPointerCancel: () => { const el = sheetRef.current; st.current = null; if (el) { el.style.transition = ""; el.style.height = ""; } },
+  };
+  return { sheetRef, drag };
+}
+
+/** "bez przesiadek" / "1 przesiadka" for the outbound (the busier direction when it is a round trip). */
+function peekStops(t: Trip) {
+  const n = Math.max(...(["out", "ret"] as const).map((d) => Math.max(0, t.legs.filter((l) => l.dir === d).length - 1)));
+  return n === 0 ? tr("bez przesiadek") : `${n} ${plu(n, ["przesiadka", "przesiadki", "przesiadek"], ["connection", "connections"])}`;
+}
+
+/** Phone: the collapsed sheet's one line — the best price, the city and the saving against Google. */
+function PeekLine({ r, pax, params }: { r: SearchResult | null; pax: number; params: SearchParams | null }) {
+  const live = useStore((s) => s.live);
+  const phase = useStore((s) => s.phase);
+  const running = live?.status === "running" || phase === "parsing" || (phase === "searching" && !live);
+  const best = r?.trips[0] ?? null;
+  const google = r?.baseline?.price ?? null;
+  const save = best && google && google > best.price ? Math.round((google - best.price) * pax) : 0;
+  const city = best ? destCity(best) : params?.destLabel ?? "";
+  return (
+    <span className="pk">
+      <span className="pk-left">
+        <span className="pk-city">{city || tr("Wyniki")}</span>
+        <span className="pk-sub">{running ? <><i className="pk-dot" />{tr("Szukam najtańszej trasy")}</>
+          : best ? [`${fmtDate(best.outDate)}${best.retDate ? `–${fmtDate(best.retDate)}` : ""}`, peekStops(best)].filter(Boolean).join(" · ") : tr("Brak trasy")}</span>
+      </span>
+      <span className="pk-right">
+        {best && <span className="pk-price">{fmtPln(best.price * pax)}</span>}
+        {save > 0 && <span className="pk-save">−{fmtPln(save)} {tr("vs Google")}</span>}
+      </span>
+    </span>
+  );
+}
+
 function Results() {
   const r = useStore((s) => s.result);
   const phase = useStore((s) => s.phase);
@@ -1016,6 +1158,9 @@ function Results() {
   const inline = useStore((s) => s.journeyInline);
   const [view, setView] = useState<"dest" | "all">("dest");
   const [city, setCity] = useState<string | null>(null);
+  const phone = useIsPhone();
+  const snap = useStore(sheetSnap);
+  const { sheetRef, drag } = useSheetDrag();
   const [openCc, setOpenCc] = useState<string | null>(null);
   const rows = useDestinations(r, params);
   // a region spanning several countries shows one entry per country; a single country one per city
@@ -1057,16 +1202,7 @@ function Results() {
   // result stays the result); "Szukaj dokładniej" runs that city's own full search
   const pick = (c: string) => { setCity(c); setView("all"); setState({ selected: null }); };
   const deeper = (c: string) => { const d = rows.find((x) => x.city === c); if (d) void searchCity(c, d.code); };
-  return (
-    <section className={`results glass ${open ? "open" : "closed"}`} aria-label={tr("Wyniki")} hidden={journey !== "none" && !inline}>
-      <button className="r-handle" onClick={() => setState((s) => ({ panelOpen: !s.panelOpen }))} aria-expanded={open}>
-        <span className="r-grip" />
-        <span className="r-title">{params ? `${params.originLabel} → ${params.destLabel}` : tr("Wyniki")}</span>
-        <span className="mono">{n ? `${multi ? (countries ? `${plural(byCountry(rows).filter((g) => g.rows[0].best).length, "kraj", "kraje", "krajów")}, ` : "") + plural(rows.filter((d) => d.best).length, "miasto", "miasta", "miast") : plural(n, "trasa", "trasy", "tras")} · ${tr("od {price}", { price: fmtPln(r!.trips[0].price * pax) })}` : ""}</span>
-        <span className="r-chev"><Icon name="chevron" className="" /></span>
-      </button>
-      {open && (
-        <div className="r-body scroll">
+  const body = <>
           <Progress />
           {r && <>
             {pax > 1 && <p className="r-note">{tr("Ceny za {people} (cena za osobę × {n}).", { people: `${pax} ${plu(pax, ["osobę", "osoby", "osób"], ["person", "people"])}`, n: pax })}</p>}
@@ -1103,6 +1239,28 @@ function Results() {
               {r.notes.filter((nt) => !nt.startsWith("Strateg:")).map((nt) => <p key={nt} className="r-note">{tx(nt)}</p>)}
             </details>}
           </>}
+  </>;
+  if (phone) return (
+    <section ref={sheetRef} className={`results glass ph-sheet sheet-${snap}`} aria-label={tr("Wyniki")} hidden={journey !== "none" && !inline}>
+      <div className="r-handle ph-handle" role="button" tabIndex={0} aria-expanded={open} aria-label={tr("Wyniki")} {...drag}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); stepSheet(); } }}>
+        <span className="r-grip" />
+        <PeekLine r={r} pax={pax} params={params} />
+      </div>
+      {open && <div className="r-body scroll">{body}</div>}
+    </section>
+  );
+  return (
+    <section className={`results glass ${open ? "open" : "closed"}`} aria-label={tr("Wyniki")} hidden={journey !== "none" && !inline}>
+      <button className="r-handle" onClick={() => setState((s) => ({ panelOpen: !s.panelOpen }))} aria-expanded={open}>
+        <span className="r-grip" />
+        <span className="r-title">{params ? `${params.originLabel} → ${params.destLabel}` : tr("Wyniki")}</span>
+        <span className="mono">{n ? `${multi ? (countries ? `${plural(byCountry(rows).filter((g) => g.rows[0].best).length, "kraj", "kraje", "krajów")}, ` : "") + plural(rows.filter((d) => d.best).length, "miasto", "miasta", "miast") : plural(n, "trasa", "trasy", "tras")} · ${tr("od {price}", { price: fmtPln(r!.trips[0].price * pax) })}` : ""}</span>
+        <span className="r-chev"><Icon name="chevron" className="" /></span>
+      </button>
+      {open && (
+        <div className="r-body scroll">
+          {body}
         </div>
       )}
     </section>
@@ -1153,6 +1311,31 @@ function TopForm() {
   const anyOpen = useStore((s) => s.pins !== null);
   const open = useStore((s) => s.panelOpen);
   const busy = phase === "parsing" || (phase === "searching" && getState().live?.status === "running");
+  const phone = useIsPhone();
+  const [formOpen, setFormOpen] = useState(false);
+  const params = useStore((s) => s.params);
+  const full = useStore((s) => sheetSnap(s) === "full" && s.phase !== "idle");
+  if (phone) return (
+    <div className={`top ph-top ${journey !== "none" && !inline ? "hidden" : ""} ${full && !formOpen ? "under-sheet" : ""}`}>
+      {formOpen ? (
+        <div className="ph-form" role="dialog" aria-label={tr("Wyszukiwanie")}>
+          <div className="ph-menu-head"><span className="ph-title">{tr("Wyszukiwanie")}</span>
+            <button className="ph-round flat" onClick={() => setFormOpen(false)} aria-label={tr("Zamknij")}><Icon name="close" className="" /></button></div>
+          <SearchFormPanel busy={busy} hidden={false}
+            onSearch={(f) => { setFormOpen(false); setState({ sheet: "half" }); void startForm(f); }}
+            onAsk={(q) => { setFormOpen(false); setState({ sheet: "half" }); void startSearch(q); }} />
+        </div>
+      ) : (
+        <div className="ph-bar">
+          <button className="ph-pill" onClick={() => setFormOpen(true)}>
+            <Icon name="search" className="" />
+            <span className={params ? "" : "ph-pill-empty"}>{searchSummary(params)}</span>
+          </button>
+          <PhoneMenu />
+        </div>
+      )}
+    </div>
+  );
   return (
     <div className={`top ${journey !== "none" && !inline ? "hidden" : ""} ${anyOpen ? "any-open" : ""} ${phase !== "idle" && (open || picked || journey !== "none") ? "folded" : ""}`}>
       <Brand />
@@ -1163,6 +1346,7 @@ function TopForm() {
 
 export default function App() {
   const lang = useLang();
+  const phone = useIsPhone();
   useEffect(() => { void refreshPush(); }, []);
   useEffect(() => setLang(storedLang(), false), []);
   return (
@@ -1175,6 +1359,7 @@ export default function App() {
         <AnywherePanel onSearch={(f) => void startForm(f)} />
         <JourneyOverlay />
         <Radar />
+        {phone && <PhoneTabs />}
       </Fragment>
     </main>
   );
