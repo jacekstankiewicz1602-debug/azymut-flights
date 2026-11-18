@@ -1,18 +1,17 @@
 # Azymut
 
-**Wyszukiwarka najtańszych lotów, która składa trasy z osobnych biletów.** Szuka tak, jak zrobiłby to
-uparty człowiek z dziesięcioma kartami w przeglądarce: tanie linie do dużego hubu, bilet powrotny z
-innego miasta, przesiadka z noclegiem, autobus na lotnisko za granicą. Wszystko na darmowych źródłach,
-na Twoim komputerze.
+**English** · [Polski](README.pl.md)
 
-*A flight search engine that builds the cheapest trips out of separate tickets (low-cost hops, hub
-round trips, self-transfers). Free data sources only, runs locally. The UI is in Polish.*
+**A flight search engine that builds the cheapest trips out of separate tickets.** It searches the
+way a stubborn person with ten browser tabs would: low-cost hops to a big hub, a return ticket from
+another city, a stopover with a night in between, a bus to an airport across the border. Free data
+sources only, running on your own computer. The interface is in English and Polish.
 
-![Szukanie: sieć sprawdzanych połączeń rośnie na kuli](docs/szukanie.png)
+![Searching: the network of checked connections grows on the globe](docs/szukanie.png)
 
-## Instalacja (5 minut)
+## Install (5 minutes)
 
-Potrzebujesz [Node.js](https://nodejs.org) 20 lub nowszego i gita.
+You need [Node.js](https://nodejs.org) 20 or newer and git.
 
 ```bash
 git clone https://github.com/jacekstankiewicz1602-debug/azymut-flights.git
@@ -21,88 +20,92 @@ npm install
 npm run local
 ```
 
-Otwórz **http://localhost:3000**. Bez kont, kluczy i haseł.
+Open **http://localhost:3000**. No accounts, keys or passwords.
 
-`npm run local` uruchamia trzy rzeczy naraz:
+`npm run local` starts three things at once:
 
-- **bazę danych:** prawdziwy Postgres z paczki npm (bez Dockera), dane w folderze `.azymut/`;
-- **stronę:** Next.js na porcie 3000;
-- **workera:** silnik szukania, który pracuje w tle, więc możesz zamknąć kartę i wrócić po wynik.
+- **a database:** a real Postgres from an npm package (no Docker), data in `.azymut/`;
+- **the site:** Next.js on port 3000;
+- **the worker:** the search engine, running in the background, so you can close the tab and come
+  back for the result.
 
-Przy pierwszym uruchomieniu do bazy trafia dołączona mapa cen (`data/map-snapshot.json.gz`, ok. 27
-tys. połączeń). Ctrl+C zatrzymuje wszystko.
+On the first run the bundled price map (`data/map-snapshot.json.gz`, about 27,000 connections) is
+loaded into the database; it refreshes itself on start when it is more than a day old (a few minutes
+in the background). Ctrl+C stops everything. Another port: `PORT=3100 npm run local`.
 
-Mapa cen odświeża się sama przy starcie, jeśli ma więcej niż dobę (kilka minut w tle). Inny port:
-`PORT=3100 npm run local`.
+## What it does
 
-## Co potrafi
+- **Separate tickets:** combines flights of different airlines and bookings, with time for the
+  connection, a night's stay and the transfer between airports.
+- **Return tickets from hubs:** e.g. Budapest ⇄ Bangkok plus a separate flight to Budapest, often
+  far cheaper than one ticket from home.
+- **Proof of optimality:** branch and bound over a map of lower price bounds; the result says "checked
+  everything, it doesn't get cheaper" or how much cheaper it still could be (the gap).
+- **Modes:** quick (~12 min, and if a gap is left it keeps going in the background), research ~1 h,
+  until proven.
+- **Anywhere:** the cheapest destinations in the world from your city.
+- **Russia and far-off places:** flights via Yerevan, Istanbul, Dubai (Aviasales), far hubs
+  (Singapore, Bangkok, Doha…).
+- **Baggage:** cabin bag only or with a checked bag, with each airline's fees.
+- **On the phone:** the site installs like an app and sends a notification when a search is done.
 
-- **Osobne bilety:** łączy loty różnych linii i biletów, liczy czas na przesiadkę, nocleg i dojazd
-  między lotniskami.
-- **Bilety powrotne w hubach:** np. Budapeszt ⇄ Bangkok i osobno dolot do Budapesztu, często dużo
-  taniej niż jeden bilet z Polski.
-- **Dowód optymalności:** branch and bound na mapie dolnych granic cen; wynik „sprawdziłem wszystko,
-  taniej się nie da” albo luka, ile jeszcze mogłoby być taniej.
-- **Tryby:** szybki (~12 min, a gdy zostaje luka, szuka dalej w tle), research ~1 h, do skutku.
-- **Gdziekolwiek:** najtańsze kierunki na świecie z wybranego miasta.
-- **Rosja i egzotyka:** loty przez Erywań, Stambuł, Dubaj (Aviasales), dalekie huby (Singapur,
-  Bangkok, Doha…).
-- **Bagaż:** tylko podręczny albo z rejestrowanym, z opłatami każdej linii.
-- **Na telefonie:** strona instaluje się jak aplikacja i wysyła powiadomienie, gdy szukanie się skończy.
+Defaults (home city Poznań, departures from Poland plus Berlin, Prague and Budapest) are tuned for
+Poland; type any city or country in "from".
 
-![Wynik w jasnym motywie](docs/wynik-jasny.png)
+![A result in the light theme](docs/wynik-jasny.png)
 
-## Źródła danych
+## Data sources
 
-Wszystkie bezpłatne, przez publiczne endpointy stron:
+All free, through the sites' public endpoints:
 
-| Źródło | Do czego |
+| Source | Used for |
 |---|---|
-| Google Flights | ceny na konkretne dni, siatki dat, cena bazowa do porównania |
-| Kiwi.com | długie odcinki na całe okno dat, gotowe kombinacje z osobnych biletów |
-| Ryanair, Wizz Air | kalendarze cen i mapa tras |
-| Aviasales | kalendarze cen, m.in. loty do i z Rosji |
-| Kayak | mapa cen „gdziekolwiek” |
-| FlixBus | dojazdy autobusem z prawdziwymi godzinami i cenami |
+| Google Flights | prices for given days, date grids, the baseline price to compare with |
+| Kiwi.com | long legs over the whole date window, ready-made separate-ticket combinations |
+| Ryanair, Wizz Air | price calendars and route maps |
+| Aviasales | price calendars, incl. flights to and from Russia |
+| Kayak | the "anywhere" price map |
+| FlixBus | bus transfers with real times and prices |
 
-Opcjonalnie (domyślnie wyłączone, patrz `.env.example`): SerpAPI, Duffel, Claude (rozpoznawanie
-nazw miejsc w zdaniach).
+Optional (off by default, see `.env.example`): SerpAPI, Duffel, Claude (reading place names in
+sentences).
 
-> Azymut nie jest powiązany z żadną z tych firm. Korzysta z publicznych stron tak jak przeglądarka,
-> z limitami zapytań i pamięcią odpowiedzi. Używaj go prywatnie i z umiarem. Ceny to stan z chwili
-> zapytania: przed zakupem zawsze sprawdź je u przewoźnika.
+> Azymut is not affiliated with any of these companies. It uses their public pages the way a browser
+> does, with rate limits and a response cache. Use it privately and in moderation. Prices are as of
+> the moment of the query: always check them with the airline before buying.
 
-## Własny serwer (opcjonalnie)
+## Your own server (optional)
 
-Tak działa wersja dla znajomych: strona na Vercel, baza w Neon (darmowe plany), worker na laptopie.
+How the version for friends runs: the site on Vercel, the database on Neon (free plans), the worker on
+a laptop.
 
-1. Zaimportuj repo w Vercel i podłącz bazę Neon (Marketplace). Ustaw zmienne:
-   `APP_PASSWORD` (hasło do strony), `CRON_SECRET` (dowolny losowy ciąg).
-2. Na komputerze, który ma szukać: `.env.local` z `DATABASE_URL` (z Neon), `CRON_SECRET` i
-   `APP_URL` (adres strony), potem `npm run worker` albo `./worker/install.sh`, żeby startował sam
-   (systemd, Linux). Szczegóły w [worker/README.md](worker/README.md).
-3. Mapa cen odświeża się sama przez GitHub Actions (`.github/workflows/map.yml`, sekret
-   `DATABASE_URL`).
+1. Import the repo in Vercel and connect a Neon database (Marketplace). Set `APP_PASSWORD` (the
+   site's password) and `CRON_SECRET` (any random string).
+2. On the computer that should search: `.env.local` with `DATABASE_URL` (from Neon), `CRON_SECRET`
+   and `APP_URL` (the site's address), then `npm run worker`, or `./worker/install.sh` to start it
+   automatically (systemd, Linux). Details in [worker/README.md](worker/README.md).
+3. The price map can refresh itself through GitHub Actions (`.github/workflows/map.yml`): set the
+   repository variable `AZYMUT_MAP=1` and the secret `DATABASE_URL`.
 
-Bez działającego workera szybkie szukania idą na Vercel w krokach po ~2 minuty.
+Without a running worker, quick searches run on Vercel in steps of about 2 minutes.
 
-## Jak to działa
+## How it works
 
-- `lib/engine.ts`: silnik. Gotowe kombinacje Kiwi jako pierwszy punkt odniesienia, potem bilety
-  powrotne w hubach i branch and bound na mapie dolnych granic (osobne kolejki tam i powrót,
-  zapytania zbiorcze zaostrzają wiele granic naraz). Harmonogram to programowanie dynamiczne po
-  konkretnych lotach i kursach autobusów (min. 3 h przesiadki, 5 h przy zmianie lotniska).
-- `lib/live.ts`: wyszukiwanie wznawialne. Odpowiedzi źródeł są zapisywane przy wyszukiwaniu, więc
-  każdy kolejny krok odtwarza wcześniejszą pracę w sekundy i idzie dalej.
-- `lib/sources/`: klienci źródeł z limitami, pamięcią i ponawianiem.
-- `scripts/worker.ts`: worker, `scripts/local.ts`: tryb lokalny, `scripts/map-worker.ts`: mapa cen.
-- `components/`: interfejs (Next.js, React), kula na MapLibre GL (OpenFreeMap, bez klucza).
+- `lib/engine.ts`: the engine. Kiwi's ready-made combinations as the first reference, then return
+  tickets from hubs and branch and bound over the lower-bound map (separate queues out and back; bulk
+  queries tighten many bounds at once). Scheduling is dynamic programming over real flights and bus
+  runs (at least 3 h per connection, 5 h when changing airports).
+- `lib/live.ts`: resumable searches. Source answers are stored with the search, so each next step
+  replays earlier work in seconds and goes further.
+- `lib/sources/`: source clients with rate limits, caching and retries.
+- `scripts/worker.ts`: the worker, `scripts/local.ts`: local mode, `scripts/map-worker.ts`: the price map.
+- `components/`: the interface (Next.js, React), the globe on MapLibre GL (OpenFreeMap, no key).
 
 ```bash
 npm run typecheck
 npx tsx scripts/test-engine.ts "Poznań → Lima, luty 2027, 14–21 dni"
 ```
 
-## Licencja
+## License
 
-MIT, patrz [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

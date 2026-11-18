@@ -894,3 +894,49 @@ li.open > .any-row, li.open > .dest { background: var(--sunken); }
 .f-strict input { accent-color: var(--accent); width: 12px; height: 12px; margin: 0; flex: none; }
 .f-strict:hover { color: var(--ink); }
 .f-strict.on { color: var(--accent-ink); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-mid); }
+
+/* ---------------- phone v2: compact chrome, more globe, thumb-sized controls ---------------- */
+@media (max-width: 720px) {
+  /* header: logo and switches in one row, the toolbar below scrolls sideways in one line */
+  .brand { flex-wrap: wrap; gap: 6px; padding: 0 2px; }
+  .wordmark { font-size: 14px; letter-spacing: 0.18em; order: 0; }
+  .wordmark::after { width: 6px; height: 12px; }
+  .theme-switch { order: 1; padding: 2px; }
+  .lang-switch { margin-left: 0; }
+  .theme-switch button { padding: 4px 8px; font-size: 11.5px; }
+  .toolbar { order: 2; flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; padding: 2px; }
+  .toolbar::-webkit-scrollbar { display: none; }
+  .toolbar .nav-arrows { display: none; }
+  .toolbar .radar-btn { flex: none; white-space: nowrap; font-size: 13px; padding: 5px 10px; }
+  .toolbar .recent { flex: none; }
+  /* form: trip type on its own line, the options as one sideways-scrolling row */
+  .topform { padding: 8px; }
+  /* form: trip type across the width, then the options in one row (selects shrink, "more" is a chevron) */
+  .f-row1 { flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .f-row1 .seg { flex: 1 1 100%; }
+  .f-row1 .seg button { flex: 1; padding: 6px 4px; font-size: 13px; }
+  .f-row1 .f-inline { flex: 1 1 0; min-width: 0; }
+  .f-inline select { width: 100%; min-width: 0; text-overflow: ellipsis; font-size: 13px; padding: 6px 22px 6px 9px; background-position: right 7px center; }
+  .more-btn { flex: none; margin-left: 0; font-size: 0; padding: 6px 11px; background: var(--sunken); border-radius: var(--r-sm); }
+  .more-btn::after { margin-left: 0; width: 7px; height: 7px; }
+  :root[data-theme="dark"] .more-btn { background: rgba(255, 255, 255, 0.05); }
+  .f-field { padding: 7px 12px 8px; }
+  .f-field input, .f-datebtn { font-size: 16px; } /* 16 px: iOS does not zoom into the field */
+  .f-strict { top: 5px; right: 6px; font-size: 9.5px; padding: 2px 4px; }
+  .f-strict input { width: 11px; height: 11px; }
+  .topform .btn.primary { padding: 11px; }
+  /* results: a sheet that leaves the top third to the globe; folded it is just the handle */
+  .results { max-height: min(62vh, calc(100dvh - var(--top, 170px) - 8px)); border-radius: 20px 20px 0 0; }
+  .r-handle { padding: 18px 16px 10px; font-size: 14px; gap: 8px; }
+  .r-handle .mono { font-size: 11px; white-space: nowrap; }
+  .r-body { padding: 0 10px 16px; }
+  .progress { padding: 12px; }
+  .pg-prices .pg-v.big { font-size: 26px; }
+  .trips > li.best .tr-price { font-size: 30px; }
+  .trips > li.best .trip, .trips > li:not(.best) .trip { padding: 12px 14px; }
+  .feed { height: 150px; font-size: 10.5px; }
+  .term-path { display: none; }
+  .pg-hero { gap: 12px; }
+  .pg-left { font-size: 20px; }
+  .maplibregl-ctrl-bottom-right { display: none; }
+}

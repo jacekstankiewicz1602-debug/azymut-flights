@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SearchResult, Trip } from "@/lib/engine";
 import type { SearchParams } from "@/lib/types";
 import { AIRPORT_POS, ccOf, countryName, fmtDate, fmtPln, fmtTime } from "./geo";
@@ -9,9 +9,15 @@ import { AnywherePanel, openAnywhere } from "./Anywhere";
 import { feedLine, type FeedLine } from "./feed";
 import { getState, liveArcs, markBest, resetSearch, setState, touchArc, useStore, type Pin, type State, type Stats } from "./store";
 import { enablePush, pushState, refreshPush, type PushState } from "./push";
+import { locale, plural as plu, setLang, storedLang, t as tr, tx, useLang } from "./i18n";
 import { bagOf, bookings, plural, carrierCode, cityOf as tripCity, connBefore, dur, ICONS, isGround as groundLeg, isOneTicket, logoUrl, ticketNumbers } from "./trip-info";
 
 const Scene = dynamic(() => import("./earth/Earth"), { ssr: false });
+
+/** Translated text with React nodes in its {placeholders} (bold prices inside a sentence). */
+function rich(key: string, nodes: Record<string, ReactNode>) {
+  return tr(key).split(/\{(\w+)\}/).map((p, i) => (i % 2 ? <Fragment key={i}>{nodes[p]}</Fragment> : p));
+}
 
 const EXAMPLES = [
   "z Polski do Peru, luty, tam i z powrotem",
@@ -113,7 +119,7 @@ function follow(id: string) {
     const gap = lines.length ? Math.min(350, 1400 / lines.length) : 0;
     lines.forEach((l, k) => setTimeout(() => {
       if (followed !== id) return;
-      if (l.tag !== "phase" && !l.note.startsWith("z pamięci") && l.from && l.to && l.from !== l.to) touchArc(l.from, l.to, "checking");
+      if (l.tag !== "phase" && !l.hit && l.from && l.to && l.from !== l.to) touchArc(l.from, l.to, "checking");
       setState((s) => ({ feed: [...s.feed, { ...l, at: Date.now() }].slice(-40) }));
     }, k * gap));
     if (best && getState().best?.id !== best.id) markBest(best.nodes);
@@ -145,8 +151,8 @@ function follow(id: string) {
 function notifyDone(status: string, price: number | null, params: SearchParams) {
   try {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
-    const title = status === "error" ? "Azymut: wyszukiwanie przerwane" : `Azymut: ${params.originLabel} → ${params.destLabel}`;
-    const body = price ? `Najtańsza trasa: ${fmtPln(price * (params.pax ?? 1))}${status === "done" ? " (sprawdzone wszystko)" : ""}` : "Zobacz wynik";
+    const title = status === "error" ? tr("Azymut: wyszukiwanie przerwane") : `Azymut: ${params.originLabel} → ${params.destLabel}`;
+    const body = price ? `${tr("Najtańsza trasa: {price}", { price: fmtPln(price * (params.pax ?? 1)) })}${status === "done" ? ` (${tr("sprawdzone wszystko")})` : ""}` : tr("Zobacz wynik");
     const n = new Notification(title, { body, icon: "/icon.svg", tag: "azymut-search" });
     n.onclick = () => { window.focus(); n.close(); };
   } catch { /* unsupported */ }
@@ -157,8 +163,8 @@ function notifyDrop(prelim: number, price: number, params: SearchParams) {
   try {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     const pax = params.pax ?? 1;
-    const n = new Notification(`Azymut: taniej o ${fmtPln((prelim - price) * pax)}`, {
-      body: `${params.originLabel} → ${params.destLabel}: ${fmtPln(price * pax)} zamiast wstępnych ${fmtPln(prelim * pax)}. Szukam dalej.`,
+    const n = new Notification(tr("Azymut: taniej o {amount}", { amount: fmtPln((prelim - price) * pax) }), {
+      body: tr("{route}: {price} zamiast wstępnych {prelim}. Szukam dalej.", { route: `${params.originLabel} → ${params.destLabel}`, price: fmtPln(price * pax), prelim: fmtPln(prelim * pax) }),
       icon: "/icon.svg", tag: "azymut-drop",
     });
     n.onclick = () => { window.focus(); n.close(); };
@@ -222,16 +228,17 @@ function Brand() {
     <header className="brand">
       <div className="wordmark">Azymut</div>
       <div className="toolbar">
-        <nav className="nav-arrows" aria-label="Poprzednie i następne wyszukiwanie">
-          <button onClick={() => history.back()} aria-label="Wstecz" title="Wstecz (poprzednie wyszukiwanie)"><Icon name="arrow" className="ico flip" /></button>
-          <button onClick={() => history.forward()} aria-label="Dalej" title="Dalej"><Icon name="arrow" className="ico" /></button>
+        <nav className="nav-arrows" aria-label={tr("Poprzednie i następne wyszukiwanie")}>
+          <button onClick={() => history.back()} aria-label={tr("Wstecz")} title={tr("Wstecz (poprzednie wyszukiwanie)")}><Icon name="arrow" className="ico flip" /></button>
+          <button onClick={() => history.forward()} aria-label={tr("Dalej")} title={tr("Dalej")}><Icon name="arrow" className="ico" /></button>
         </nav>
         <i className="tb-sep" />
         <Recent />
-        <button className="radar-btn" onClick={openAnywhere}>Gdziekolwiek tanio</button>
+        <button className="radar-btn" onClick={openAnywhere}>{tr("Gdziekolwiek tanio")}</button>
         <RadarButton />
       </div>
       <ThemeSwitch />
+      <LangSwitch />
     </header>
   );
 }
@@ -242,9 +249,20 @@ function ThemeSwitch() {
   useEffect(() => { setTh(document.documentElement.dataset.theme === "light" ? "light" : "dark"); }, []);
   const set = (t: "dark" | "light") => { setTh(t); window.dispatchEvent(new CustomEvent("azymut-theme", { detail: t })); };
   return (
-    <div className="theme-switch" role="group" aria-label="Motyw">
-      <button className={th === "dark" ? "on" : ""} aria-pressed={th === "dark"} onClick={() => set("dark")}><Icon name="moon" className="" /><span>Ciemny</span></button>
-      <button className={th === "light" ? "on" : ""} aria-pressed={th === "light"} onClick={() => set("light")}><Icon name="sun" className="" /><span>Jasny</span></button>
+    <div className="theme-switch" role="group" aria-label={tr("Motyw")}>
+      <button className={th === "dark" ? "on" : ""} aria-pressed={th === "dark"} onClick={() => set("dark")}><Icon name="moon" className="" /><span>{tr("Ciemny")}</span></button>
+      <button className={th === "light" ? "on" : ""} aria-pressed={th === "light"} onClick={() => set("light")}><Icon name="sun" className="" /><span>{tr("Jasny")}</span></button>
+    </div>
+  );
+}
+
+/** Interface language: Polish or English, remembered on this device. */
+function LangSwitch() {
+  const lang = useLang();
+  return (
+    <div className="theme-switch lang-switch" role="group" aria-label={tr("Język")} style={{ marginLeft: 0 }}>
+      <button className={lang === "pl" ? "on" : ""} aria-pressed={lang === "pl"} lang="pl" title="Polski" onClick={() => setLang("pl")}>PL</button>
+      <button className={lang === "en" ? "on" : ""} aria-pressed={lang === "en"} lang="en" title="English" onClick={() => setLang("en")}>EN</button>
     </div>
   );
 }
@@ -252,7 +270,7 @@ function ThemeSwitch() {
 type RecentItem = { id: string; label: string; status: string; price: number | null; deep: boolean; at: string };
 const ago = (iso: string) => {
   const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
-  return m < 1 ? "teraz" : m < 60 ? `${m} min temu` : m < 1440 ? `${Math.round(m / 60)} h temu` : `${Math.round(m / 1440)} d temu`;
+  return m < 1 ? tr("teraz") : m < 60 ? tr("{n} min temu", { n: m }) : m < 1440 ? tr("{n} h temu", { n: Math.round(m / 60) }) : tr("{n} d temu", { n: Math.round(m / 1440) });
 };
 
 /** "Ostatnie": the latest searches, one click back to any of them. */
@@ -271,13 +289,13 @@ function Recent() {
   const go = (id: string) => { setOpen(false); if (id !== followed) location.hash = `s=${id}`; };
   return (
     <div className="recent" ref={ref}>
-      <button className={`radar-btn ${open ? "on" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu">Ostatnie <Icon name="chevron" className="ico chev" /></button>
+      <button className={`radar-btn ${open ? "on" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu">{tr("Ostatnie")} <Icon name="chevron" className="ico chev" /></button>
       {open && <div className="recent-menu glass" role="menu">
-        {!items ? <p className="rc-empty">Wczytuję…</p> : !items.length ? <p className="rc-empty">Brak wyszukiwań.</p> : items.map((it) => (
+        {!items ? <p className="rc-empty">{tr("Wczytuję…")}</p> : !items.length ? <p className="rc-empty">{tr("Brak wyszukiwań.")}</p> : items.map((it) => (
           <button key={it.id} role="menuitem" className={`rc-item ${it.id === followed ? "on" : ""}`} onClick={() => go(it.id)}>
             <span className={`rc-dot st-${it.status}`} />
-            <span className="rc-label">{it.label}{it.deep ? <em> · research</em> : null}</span>
-            <span className="rc-price mono">{it.price ? fmtPln(it.price) : it.status === "running" ? "szuka…" : "—"}</span>
+            <span className="rc-label">{tx(it.label)}{it.deep ? <em> · research</em> : null}</span>
+            <span className="rc-price mono">{it.price ? fmtPln(it.price) : it.status === "running" ? tr("szuka…") : "—"}</span>
             <span className="rc-ago">{ago(it.at)}</span>
           </button>
         ))}
@@ -300,7 +318,7 @@ function Counter({ value, decimals = 0 }: { value: number; decimals?: number }) 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [value, decimals]);
-  return <>{shown.toLocaleString("pl-PL", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).replace(/,(?=\d{3})/g, " ")}</>;
+  return <>{shown.toLocaleString(locale(), { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).replace(/,(?=\d{3})/g, " ")}</>;
 }
 
 type ProgressInfo = { pct: number; etaSec: number | null; combos: number };
@@ -334,15 +352,22 @@ async function searchCity(city: string, code: string) {
 
 /** Engine phase messages are technical: show the person what it means for them. */
 function friendly(message: string, prelim: number | null, cheaper: boolean, running: boolean) {
-  if (!running) return message;
-  if (/kolejce|worker|Wczytuję|Uruchamiam|Rozumiem|Przygotowuję|Zatrzymuję/i.test(message)) return message;
-  if (cheaper) return "Znalazłem taniej niż wstępnie – szukam dalej…";
-  return prelim !== null ? `Wstępnie: ${fmtPln(prelim)} · szukam taniej…` : "Szukam najtańszej trasy";
+  if (!running) return say(message);
+  if (/kolejce|worker|Wczytuję|Uruchamiam|Rozumiem|Przygotowuję|Zatrzymuję/i.test(message)) return say(message);
+  if (cheaper) return tr("Znalazłem taniej niż wstępnie – szukam dalej…");
+  return prelim !== null ? tr("Wstępnie: {price} · szukam taniej…", { price: fmtPln(prelim) }) : tr("Szukam najtańszej trasy");
+}
+
+/** The status line is kept in Polish in the store (phase checks match on it) and translated for display. */
+function say(message: string) {
+  if (message.startsWith("Błąd: ")) return tr("Błąd: {error}", { error: tx(message.slice(6)) });
+  const whole = tx(message);
+  return whole !== message ? whole : message.split(" · ").map(tx).join(" · ");
 }
 
 /** "−240 zł vs wstępny", replayed (price-drop animation) whenever the price falls again. */
 function DropChip({ prelim, best }: { prelim: number; best: number }) {
-  return <span key={best} className="pg-drop mono">−{fmtPln(prelim - best)} vs wstępny</span>;
+  return <span key={best} className="pg-drop mono">{tr("−{amount} vs wstępny", { amount: fmtPln(prelim - best) })}</span>;
 }
 
 function Progress() {
@@ -388,38 +413,38 @@ function Progress() {
     <div className="progress">
       <div className="pg-top">
         <div className={`pg-msg ${running ? "pulse" : ""} ${phase === "error" ? "err" : ""}`}>{friendly(message, prelim !== null ? prelim * pax : null, cheaper, running)}</div>
-        {live?.status === "running" && !anywhere && <button className="pg-stop" onClick={() => void stopSearch()}>Zatrzymaj i pokaż wynik</button>}
+        {live?.status === "running" && !anywhere && <button className="pg-stop" onClick={() => void stopSearch()}>{tr("Zatrzymaj i pokaż wynik")}</button>}
       </div>
       {running && <div className="pg-hero">
         <Ring pct={pct} />
         <div className="pg-hero-txt">
           <div className="pg-left mono">{left != null ? (left < 60 ? "< 1 min" : `${Math.round(left / 60)} min`) : "…"}</div>
-          <div className="pg-k">{left != null ? "do końca (szacunek)" : "szacuję czas do końca"}</div>
+          <div className="pg-k">{left != null ? tr("do końca (szacunek)") : tr("szacuję czas do końca")}</div>
           <div className="pg-time mono">
             <span>{clock(live?.elapsed ?? 0)}</span>
-            <span><Counter value={queries} /> zapytań</span>
-            {(ext.progress?.combos ?? 0) > 0 && <span><Counter value={ext.progress!.combos} /> kombinacji</span>}
+            <span><Counter value={queries} /> {tr("zapytań")}</span>
+            {(ext.progress?.combos ?? 0) > 0 && <span><Counter value={ext.progress!.combos} /> {tr("kombinacji")}</span>}
           </div>
         </div>
       </div>}
       {running && <Feed queries={queries} />}
       {running && srcs.length > 0 && <div className="pg-src">{srcs.map(([k, v]) => <span key={k} className={`src-chip s-${k}`}><i />{SRC_NAME[k] ?? k} <b className="mono">{v}</b></span>)}</div>}
       <div className="pg-prices">
-        <div><span className="pg-k">{running ? (cheaper || prelim === null ? "Najlepsza do tej pory" : "Wstępnie") : "Najtańsza trasa"}</span>
+        <div><span className="pg-k">{running ? (cheaper || prelim === null ? tr("Najlepsza do tej pory") : tr("Wstępnie")) : tr("Najtańsza trasa")}</span>
           <span className={`pg-v mono big ${cheaper ? "down" : ""}`}>{best !== null ? <><Counter key="b" value={best * pax} /> zł</> : "—"}</span>
           {cheaper && <DropChip prelim={prelim! * pax} best={best! * pax} />}</div>
-        <div><span className="pg-k">Google</span><span className="pg-v mono">{google ? fmtPln(google * pax) : running ? (bs && !bs.ok ? "brak ceny" : "sprawdzam…") : "—"}</span>
-          {google && gb?.access ? <span className="pg-sub mono">z dojazdem {fmtPln(gb.access * pax)}</span> : null}</div>
+        <div><span className="pg-k">Google</span><span className="pg-v mono">{google ? fmtPln(google * pax) : running ? (bs && !bs.ok ? tr("brak ceny") : tr("sprawdzam…")) : "—"}</span>
+          {google && gb?.access ? <span className="pg-sub mono">{tr("z dojazdem {price}", { price: fmtPln(gb.access * pax) })}</span> : null}</div>
       </div>
       {!anywhere && best !== null && <p className={`pg-gap ${gap === 0 ? "ok" : ""}`}>
-        {gap === 0 ? "Sprawdziłem wszystko: taniej się nie da." : gap != null && gap > 0 ? <>Może być jeszcze do <b className="mono">{fmtPln(gap * pax)}</b> taniej{running ? " – szukam" : ""}.</> : running ? "Szukam, czy da się taniej." : "Nie sprawdziłem wszystkiego, może być taniej."}
+        {gap === 0 ? tr("Sprawdziłem wszystko: taniej się nie da.") : gap != null && gap > 0 ? <>{rich("Może być jeszcze do {gap} taniej", { gap: <b className="mono">{fmtPln(gap * pax)}</b> })}{running ? ` – ${tr("szukam")}` : ""}.</> : running ? tr("Szukam, czy da się taniej.") : tr("Nie sprawdziłem wszystkiego, może być taniej.")}
       </p>}
-      {running && extMin ? <p className="pg-note">Szybkie 12 min nie wystarczyło do dowodu, więc szukam dalej w tle – do {extMin} min więcej. Najlepsza trasa jest już widoczna niżej.</p> : null}
+      {running && extMin ? <p className="pg-note">{tr("Szybkie 12 min nie wystarczyło do dowodu, więc szukam dalej w tle – do {n} min więcej. Najlepsza trasa jest już widoczna niżej.", { n: extMin })}</p> : null}
       {running && <NotifyMe />}
-      {bs && !bs.ok && (running ? <p className="pg-warn">Brak ceny Google do porównania{bs.note ? `: ${bs.note}` : ""}.</p>
-        : <p className="pg-note">Google Flights nie podał ceny na tę trasę, więc nie ma z czym porównać.</p>)}
+      {bs && !bs.ok && (running ? <p className="pg-warn">{tr("Brak ceny Google do porównania")}{bs.note ? `: ${tx(bs.note)}` : ""}.</p>
+        : <p className="pg-note">{tr("Google Flights nie podał ceny na tę trasę, więc nie ma z czym porównać.")}</p>)}
       {p?.depth === "deep" && <DeepInfo />}
-      {!running && live && <div className="pg-foot">{clock(live.elapsed)} · {(ext.progress?.combos ?? s.checked).toLocaleString("pl-PL")} sprawdzonych kombinacji · $0{live.status === "stopped" ? " · zatrzymane przez Ciebie" : ""}</div>}
+      {!running && live && <div className="pg-foot">{clock(live.elapsed)} · {(ext.progress?.combos ?? s.checked).toLocaleString(locale())} {tr("sprawdzonych kombinacji")} · $0{live.status === "stopped" ? ` · ${tr("zatrzymane przez Ciebie")}` : ""}</div>}
     </div>
   );
 }
@@ -428,13 +453,13 @@ function Progress() {
 function NotifyMe() {
   const [st, setSt] = useState<PushState | "busy" | null>(null);
   useEffect(() => { void pushState().then(setSt); }, []);
-  if (st === null || st === "unsupported") return <p className="pg-note">Możesz zamknąć stronę – szukanie trwa dalej, a po powrocie zobaczysz aktualny wynik.</p>;
-  if (st === "on") return <p className="pg-notify on"><Icon name="check" className="ico" />Dam znać powiadomieniem, gdy skończę – możesz zamknąć aplikację.</p>;
-  if (st === "install") return <p className="pg-notify">Chcesz powiadomienie na iPhonie? Dodaj Azymut do ekranu początkowego (Udostępnij → Do ekranu początkowego) i szukaj z tej ikony.</p>;
-  if (st === "denied") return <p className="pg-notify">Powiadomienia są zablokowane w ustawieniach przeglądarki dla tej strony. Szukanie i tak trwa dalej po zamknięciu.</p>;
+  if (st === null || st === "unsupported") return <p className="pg-note">{tr("Możesz zamknąć stronę – szukanie trwa dalej, a po powrocie zobaczysz aktualny wynik.")}</p>;
+  if (st === "on") return <p className="pg-notify on"><Icon name="check" className="ico" />{tr("Dam znać powiadomieniem, gdy skończę – możesz zamknąć aplikację.")}</p>;
+  if (st === "install") return <p className="pg-notify">{tr("Chcesz powiadomienie na iPhonie? Dodaj Azymut do ekranu początkowego (Udostępnij → Do ekranu początkowego) i szukaj z tej ikony.")}</p>;
+  if (st === "denied") return <p className="pg-notify">{tr("Powiadomienia są zablokowane w ustawieniach przeglądarki dla tej strony. Szukanie i tak trwa dalej po zamknięciu.")}</p>;
   return (
     <button className="pg-notify btn-notify" disabled={st === "busy"} onClick={() => { setSt("busy"); void enablePush().then(setSt).catch(() => setSt("off")); }}>
-      <Icon name="bell" className="ico" />{st === "busy" ? "Włączam…" : "Powiadom mnie, gdy skończy"}<span className="dim">· możesz zamknąć aplikację</span>
+      <Icon name="bell" className="ico" />{st === "busy" ? tr("Włączam…") : tr("Powiadom mnie, gdy skończy")}<span className="dim">· {tr("możesz zamknąć aplikację")}</span>
     </button>
   );
 }
@@ -446,7 +471,7 @@ const SRC_NAME: Record<string, string> = { kiwi: "Kiwi", google: "Google", ryana
 function Ring({ pct }: { pct: number }) {
   const r = 30, c = 2 * Math.PI * r; // progress; ticks and a scanning arc around and inside it
   return (
-    <div className="pg-ring" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label="Postęp szukania">
+    <div className="pg-ring" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={tr("Postęp szukania")}>
       <svg viewBox="0 0 72 72" width="72" height="72">
         <circle cx="36" cy="36" r="35" className="rg-ticks" />
         <circle cx="36" cy="36" r={r} className="rg-bg" />
@@ -459,7 +484,7 @@ function Ring({ pct }: { pct: number }) {
 }
 
 /** The live query log: what the search is asking right now, newest at the bottom, in a small terminal. */
-const hms = (t?: number) => (t ? new Date(t).toLocaleTimeString("pl-PL", { hour12: false }).slice(3) : "--:--");
+const hms = (t?: number) => (t ? new Date(t).toLocaleTimeString(locale(), { hour12: false }).slice(3) : "--:--");
 function Feed({ queries }: { queries: number }) {
   const feed = useStore((x) => x.feed);
   // pace over the last 20 s of lines shown
@@ -470,15 +495,15 @@ function Feed({ queries }: { queries: number }) {
     <div className="term">
       <div className="term-bar mono">
         <span className="term-live"><i />live</span>
-        <span className="term-path">azymut@worker<span className="dim">:~/szukanie$</span></span>
-        <span className="term-rate"><b>{rate}</b>/min · <b><Counter value={queries} /></b> zap.</span>
+        <span className="term-path">azymut@worker<span className="dim">{tr(":~/szukanie$")}</span></span>
+        <span className="term-rate"><b>{rate}</b>/min · <b><Counter value={queries} /></b> {tr("zap.")}</span>
       </div>
       <div className="feed mono" aria-live="off">
-        {!feed.length && <div className="fd-line phase"><span className="fd-route">łączę się ze źródłami<span className="fd-caret" /></span></div>}
+        {!feed.length && <div className="fd-line phase"><span className="fd-route">{tr("łączę się ze źródłami")}<span className="fd-caret" /></span></div>}
         {feed.slice(-11).map((l, i, a) => {
           const last = i === a.length - 1;
           return l.tag === "phase"
-            ? <div key={l.id} className="fd-line phase"><span className="fd-t">{hms(l.at)}</span><span className="fd-route">» {l.route}{last && <span className="fd-caret" />}</span></div>
+            ? <div key={l.id} className="fd-line phase"><span className="fd-t">{hms(l.at)}</span><span className="fd-route">» {tx(l.route)}{last && <span className="fd-caret" />}</span></div>
             : <div key={l.id} className={`fd-line s-${l.tag} ${l.hit ? "hit" : ""} ${last ? "now" : ""}`}>
                 <span className="fd-t">{hms(l.at)}</span>
                 <span className="fd-src">{l.src}</span>
@@ -496,7 +521,7 @@ function RouteLine({ t }: { t: Trip }) {
   const dirs = (["out", "ret"] as const).map((d) => t.legs.filter((l) => l.dir === d)).filter((l) => l.length);
   return <>{dirs.map((legs, k) => (
     <div key={k} className="tr-route">
-      <span className="ddir">{k === 0 ? "tam" : "powrót"}</span>
+      <span className="ddir">{k === 0 ? tr("tam") : tr("powrót")}</span>
       {[legs[0].from, ...legs.map((l) => l.to)].map((c, i) => <span key={i} style={{ display: "contents" }}>{i > 0 && <Icon name="arrow" className="arrow" />}<span className="code" title={tripCity(c)}>{c}</span></span>)}
     </div>
   ))}</>;
@@ -528,9 +553,9 @@ function access(t: Trip, dir: "out" | "ret") {
 
 /** "Wylot z Berlina · dojazd 3 h 10 min, 74 zł" */
 function accessText(a: NonNullable<ReturnType<typeof access>>, dir: "out" | "ret", counted: boolean) {
-  const what = dir === "out" ? `Wylot z: ${a.city}` : `Powrót na: ${a.city}`;
+  const what = dir === "out" ? tr("Wylot z: {city}", { city: a.city }) : tr("Powrót na: {city}", { city: a.city });
   if (!a.bus) return what;
-  return `${what} · dojazd ${a.hours > 0 ? `${dur(a.hours)}, ` : ""}${counted ? fmtPln(a.cost) : "nieliczony"}`;
+  return `${what} · ${tr("dojazd")} ${a.hours > 0 ? `${dur(a.hours)}, ` : ""}${counted ? fmtPln(a.cost) : tr("nieliczony")}`;
 }
 
 function AccessLine({ t }: { t: Trip }) {
@@ -576,17 +601,17 @@ function Timeline({ t, pax }: { t: Trip; pax: number }) {
         const dayShift = l.arrLocal.slice(0, 10) !== l.depLocal.slice(0, 10);
         return (
           <div key={i}>
-            {i === 0 && <div className="tl-dir">Wylot · {fmtDate(t.outDate)}</div>}
+            {i === 0 && <div className="tl-dir">{tr("Wylot")} · {fmtDate(t.outDate)}</div>}
             {c && c.kind === "turn" && <>
               <div className="tl-conn turn"><span /><span className="rail"><b /></span><div className="box"><Icon name="pin" /><b>{c.title}</b></div></div>
-              <div className="tl-dir">Powrót · {fmtDate(t.retDate ?? l.depLocal.slice(0, 10))}</div>
+              <div className="tl-dir">{tr("Powrót")} · {fmtDate(t.retDate ?? l.depLocal.slice(0, 10))}</div>
             </>}
             {c && c.kind !== "turn" && (
               <div className={`tl-conn ${c.kind === "stay" ? "stay" : ""}`}>
                 <span /><span className="rail"><b /></span>
                 <div className="box">
                   <Icon name={c.kind === "stay" ? "bed" : "clock"} />
-                  <span>{c.kind === "stay" ? <><b>{c.title.split(" · ")[0]}</b> w mieście {c.city}</> : <>Przesiadka · <b>{dur(c.gapH)}</b> · {c.city}</>}</span>
+                  <span>{c.kind === "stay" ? <>{rich("{stay} w mieście {city}", { stay: <b>{c.title.split(" · ")[0]}</b>, city: c.city })}</> : <>{tr("Przesiadka")} · <b>{dur(c.gapH)}</b> · {c.city}</>}</span>
                   {c.chips.map((ch) => <span key={ch.label} className={`chip ${ch.tone}`}>{ch.icon && <Icon name={ch.icon} className="" />}{ch.label}</span>)}
                 </div>
               </div>
@@ -600,32 +625,32 @@ function Timeline({ t, pax }: { t: Trip; pax: number }) {
                 <div className="tl-carrier">
                   {cc ? <img className="logo" src={logoUrl(cc)} alt="" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />
                     : <span className="logo-ph"><Icon name={groundLeg(l) ? "bus" : "plane"} className="" /></span>}
-                  {nTickets > 1 && !groundLeg(l) && <span className="tl-ticket" title="Odcinki z tym samym numerem są na jednym bilecie">bilet {tickets[i]}</span>}
-                  <span className="txt">{groundLeg(l) ? (l.source === "flixbus" ? `FlixBus · ${l.flightNo}` : l.source === "local" ? "zmiana lotniska (transfer)" : "autobus / pociąg (szac.)") : `${l.carrier} ${l.flightNo}`.trim()} · {dur(h)}</span>
+                  {nTickets > 1 && !groundLeg(l) && <span className="tl-ticket" title={tr("Odcinki z tym samym numerem są na jednym bilecie")}>{tr("bilet {n}", { n: tickets[i] })}</span>}
+                  <span className="txt">{groundLeg(l) ? (l.source === "flixbus" ? `FlixBus · ${l.flightNo}` : l.source === "local" ? tr("zmiana lotniska (transfer)") : tr("autobus / pociąg (szac.)")) : `${l.carrier} ${l.flightNo}`.trim()} · {dur(h)}</span>
                 </div>
                 {(l.market || l.rtAsOw || l.note) && <div className="tl-tech">
-                  {l.market && <div>kup na rynku {l.market.label} w {l.market.currency} ({Math.round(l.market.local).toLocaleString("pl-PL")} {l.market.currency})</div>}
-                  {l.rtAsOw && <div>bilet tam i z powrotem użyty w jedną stronę (nie leć powrotnym)</div>}
-                  {l.note && <div className="dim">{l.note}</div>}
+                  {l.market && <div>{tr("kup na rynku {market} w {currency} ({amount} {currency})", { market: tx(l.market.label), currency: l.market.currency, amount: Math.round(l.market.local).toLocaleString(locale()) })}</div>}
+                  {l.rtAsOw && <div>{tr("bilet tam i z powrotem użyty w jedną stronę (nie leć powrotnym)")}</div>}
+                  {l.note && <div className="dim">{tx(l.note)}</div>}
                 </div>}
               </div>
               <div className="tl-price">
-                {l.price && l.price === l.bag ? <span className="incl">bagaż ~{fmtPln(l.bag * pax)}</span>
-                  : l.price ? <span>{fmtPln(l.price * pax)}{l.bag ? <small className="incl"> w tym bagaż ~{fmtPln(l.bag * pax)}</small> : null}</span>
-                  : <span className="incl">w cenie biletu</span>}
-                <a href={l.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{groundLeg(l) ? "trasa" : "kup"} ↗</a>
+                {l.price && l.price === l.bag ? <span className="incl">{tr("bagaż ~{price}", { price: fmtPln(l.bag * pax) })}</span>
+                  : l.price ? <span>{fmtPln(l.price * pax)}{l.bag ? <small className="incl"> {tr("w tym bagaż ~{price}", { price: fmtPln(l.bag * pax) })}</small> : null}</span>
+                  : <span className="incl">{tr("w cenie biletu")}</span>}
+                <a href={l.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{groundLeg(l) ? tr("trasa") : tr("kup")} ↗</a>
               </div>
             </div>
           </div>
         );
       })}
       <div className="tl-sum">
-        <div><span>bilety lotnicze ({nTickets} {nTickets === 1 ? "rezerwacja" : nTickets < 5 ? "rezerwacje" : "rezerwacji"})</span><span>{fmtPln(ticketsPln * pax)}</span></div>
-        {ground > 0 && <div><span>dojazd i transfery</span><span>{fmtPln(ground * pax)}</span></div>}
-        {hotels > 0 && <div><span>noclegi na postojach</span><span>{fmtPln(hotels * pax)}</span></div>}
-        <div className="total"><span>Razem{pax > 1 ? ` (${pax} os.)` : ""}</span><span>{fmtPln(t.price * pax)}</span></div>
+        <div><span>{tr("bilety lotnicze")} ({nTickets} {plu(nTickets, ["rezerwacja", "rezerwacje", "rezerwacji"], ["booking", "bookings"])})</span><span>{fmtPln(ticketsPln * pax)}</span></div>
+        {ground > 0 && <div><span>{tr("dojazd i transfery")}</span><span>{fmtPln(ground * pax)}</span></div>}
+        {hotels > 0 && <div><span>{tr("noclegi na postojach")}</span><span>{fmtPln(hotels * pax)}</span></div>}
+        <div className="total"><span>{tr("Razem")}{pax > 1 ? ` ${tr("({n} os.)", { n: pax })}` : ""}</span><span>{fmtPln(t.price * pax)}</span></div>
       </div>
-      {t.legs.some((l) => l.arrEstimated) && <div className="tl-note">* godzina przylotu wyliczona z odległości</div>}
+      {t.legs.some((l) => l.arrEstimated) && <div className="tl-note">{tr("* godzina przylotu wyliczona z odległości")}</div>}
     </div>
   );
 }
@@ -649,7 +674,7 @@ function CheaperDates() {
   if (!best || here - best.price < 150) return null;
   const n = Math.abs(best.d);
   return (
-    <p className="r-hint">Wylot {n} {n === 1 ? "dzień" : "dni"} {best.d > 0 ? "później" : "wcześniej"}: <b className="mono">−{fmtPln((here - best.price) * (p.pax ?? 1))}</b> <span className="dim">(kalendarz Google)</span></p>
+    <p className="r-hint">{tr(best.d > 0 ? "Wylot {n} {days} później:" : "Wylot {n} {days} wcześniej:", { n, days: plu(n, ["dzień", "dni", "dni"], ["day", "days"]) })} <b className="mono">−{fmtPln((here - best.price) * (p.pax ?? 1))}</b> <span className="dim">({tr("kalendarz Google")})</span></p>
   );
 }
 
@@ -665,9 +690,9 @@ function DeepInfo() {
   return (
     <div className="pg-deep">
       {waiting
-        ? <p>{live.worker?.online ? "Czeka w kolejce na workerze (najpierw kończy poprzednie wyszukiwanie)." : "Worker na laptopie jest wyłączony: wyszukiwanie czeka w kolejce i ruszy, gdy go uruchomisz (npm run worker)."}</p>
-        : d ? <p className="mono">runda {d.round}{d.chunks.length > 1 ? ` · tydzień ${d.chunk + 1}/${d.chunks.length} (${fmtDate(d.chunks[d.chunk][0])} – ${fmtDate(d.chunks[d.chunk][1])}) · ${d.proven.filter(Boolean).length}/${d.chunks.length} tygodni z dowodem` : ` · ${fmtDate(d.chunks[0][0])} – ${fmtDate(d.chunks[0][1])}, każdy dzień`}</p> : null}
-      {live.status === "running" && <p className="dim">Tryb głęboki może trwać kilka godzin. Możesz zamknąć przeglądarkę – dostaniesz powiadomienie.</p>}
+        ? <p>{live.worker?.online ? tr("Czeka w kolejce na workerze (najpierw kończy poprzednie wyszukiwanie).") : tr("Worker na laptopie jest wyłączony: wyszukiwanie czeka w kolejce i ruszy, gdy go uruchomisz (npm run worker).")}</p>
+        : d ? <p className="mono">{tr("runda {n}", { n: d.round })}{d.chunks.length > 1 ? ` · ${tr("tydzień {i}/{n}", { i: d.chunk + 1, n: d.chunks.length })} (${fmtDate(d.chunks[d.chunk][0])} – ${fmtDate(d.chunks[d.chunk][1])}) · ${tr("{done}/{n} tygodni z dowodem", { done: d.proven.filter(Boolean).length, n: d.chunks.length })}` : ` · ${fmtDate(d.chunks[0][0])} – ${fmtDate(d.chunks[0][1])}, ${tr("każdy dzień")}`}</p> : null}
+      {live.status === "running" && <p className="dim">{tr("Tryb głęboki może trwać kilka godzin. Możesz zamknąć przeglądarkę – dostaniesz powiadomienie.")}</p>}
       {live.status === "running" && <p className="dim">worker: {live.worker?.online ? "online" : "offline"}</p>}
     </div>
   );
@@ -677,17 +702,17 @@ function DeepInfo() {
 function Reasonable({ r, pax }: { r: SearchResult; pax: number }) {
   const t = r.reasonable, best = r.trips[0];
   if (!best) return null;
-  if (!t) return <p className="r-note">Nie znaleziono trasy rozsądnej (do 24 h i maks. 3 przesiadki w każdą stronę) wśród sprawdzonych.</p>;
-  if (t.id === best.id || t.price <= best.price) return <p className="r-note">Najtańsza trasa jest też rozsądna (do 24 h i maks. 3 przesiadki w każdą stronę).</p>;
+  if (!t) return <p className="r-note">{tr("Nie znaleziono trasy rozsądnej (do 24 h i maks. 3 przesiadki w każdą stronę) wśród sprawdzonych.")}</p>;
+  if (t.id === best.id || t.price <= best.price) return <p className="r-note">{tr("Najtańsza trasa jest też rozsądna (do 24 h i maks. 3 przesiadki w każdą stronę).")}</p>;
   return (
     <div className="reasonable">
       <div className="tr-top">
-        <span className="rs-k">najtańsza rozsądna</span>
+        <span className="rs-k">{tr("najtańsza rozsądna")}</span>
         <span className="mono tr-price">{fmtPln(t.price * pax)}</span>
-        <span className="mono tr-save neg">+{fmtPln((t.price - best.price) * pax)} vs najtańsza</span>
+        <span className="mono tr-save neg">{tr("+{amount} vs najtańsza", { amount: fmtPln((t.price - best.price) * pax) })}</span>
       </div>
       <RouteLine t={t} />
-      <div className="tr-meta">{fmtDate(t.outDate)}{t.retDate ? ` – ${fmtDate(t.retDate)} · ${t.stayDays} ${t.stayDays === 1 ? "dzień" : "dni"}` : ""} · {t.travelH} h w drodze · do 24 h i maks. 3 przesiadki w każdą stronę</div>
+      <div className="tr-meta">{fmtDate(t.outDate)}{t.retDate ? ` – ${fmtDate(t.retDate)} · ${t.stayDays} ${plu(t.stayDays ?? 0, ["dzień", "dni", "dni"], ["day", "days"])}` : ""} · {tr("{h} h w drodze", { h: t.travelH })} · {tr("do 24 h i maks. 3 przesiadki w każdą stronę")}</div>
     </div>
   );
 }
@@ -697,7 +722,7 @@ function StrategistLine({ r }: { r: SearchResult }) {
   if (!s?.checked) return null;
   const won = s.hypotheses.filter((h) => h.won);
   const live = s.hypotheses.filter((h) => h.status === "ok").length;
-  return <p className="r-note">Strateg: {s.checked} hipotez, {live} potwierdzonych na żywo{won.length ? `, wygrała: ${won.map((h) => h.label).join("; ")}` : ", żadna nie pobiła najlepszej trasy"}.</p>;
+  return <p className="r-note">{tr("Strateg: {n} hipotez, {live} potwierdzonych na żywo", { n: s.checked, live })}{won.length ? tr(", wygrała: {list}", { list: won.map((h) => tx(h.label)).join("; ") }) : tr(", żadna nie pobiła najlepszej trasy")}.</p>;
 }
 
 /** Connections in one direction: between flights plus the stops inside each ticket (a Google offer "1 przesiadka"). -1 when there is no such direction. */
@@ -762,13 +787,13 @@ function GoogleSteps({ t, pax }: { t: Trip; pax: number }) {
   const fare = fly.reduce((s, l) => s + l.price, 0) - bag;
   return (
     <div className="book-steps">
-      <p>Google nie sprzedaje biletu: pokaże listę lotów. Wybierz w niej:</p>
+      <p>{tr("Google nie sprzedaje biletu: pokaże listę lotów. Wybierz w niej:")}</p>
       {dirs.map((ls, i) => {
         const f = ls[0], l = ls[ls.length - 1], via = ls.slice(1).map((x) => tripCity(x.from));
-        return <div key={i} className="bs-dir">{i + 1}. <b>{i ? "Powrót" : "Wylot"} {fmtDate(f.depLocal)}</b>: {f.carrier} {fmtTime(f.depLocal)} → {fmtTime(l.arrLocal)}, {via.length ? `przesiadka w: ${via.join(", ")}` : "bez przesiadki"}</div>;
+        return <div key={i} className="bs-dir">{i + 1}. <b>{i ? tr("Powrót") : tr("Wylot")} {fmtDate(f.depLocal)}</b>: {f.carrier} {fmtTime(f.depLocal)} → {fmtTime(l.arrLocal)}, {via.length ? tr("przesiadka w: {cities}", { cities: via.join(", ") }) : tr("bez przesiadki")}</div>;
       })}
-      <p>Potem „Rezerwuj” u linii ({fly[0]?.carrier}) albo u pośrednika – kupujesz na ich stronie.
-        {withBag && bag > 0 ? <> Wybierz taryfę <b>z bagażem rejestrowanym</b>. Nasza cena {fmtPln(t.price * pax)} to bilet {fmtPln(fare * pax)} (tyle pokaże Google) + bagaż ~{fmtPln(bag * pax)} (szacunek wg cennika linii).</> : null}</p>
+      <p>{tr("Potem „Rezerwuj” u linii ({carrier}) albo u pośrednika – kupujesz na ich stronie.", { carrier: fly[0]?.carrier ?? "" })}
+        {withBag && bag > 0 ? <> {rich("Wybierz taryfę {fare}.", { fare: <b>{tr("z bagażem rejestrowanym")}</b> })} {tr("Nasza cena {price} to bilet {fare} (tyle pokaże Google) + bagaż ~{bag} (szacunek wg cennika linii).", { price: fmtPln(t.price * pax), fare: fmtPln(fare * pax), bag: fmtPln(bag * pax) })}</> : null}</p>
     </div>
   );
 }
@@ -800,19 +825,19 @@ function Booking({ t, pax, sid }: { t: Trip; pax: number; sid: string }) {
   return (
     <div className="book">
       <div className="book-actions">
-        {b.whole && <a className="btn primary" href={b.whole.url} target="_blank" rel="noreferrer"><Icon name="ticket" className="" />{b.whole.source === "google" ? "Rezerwuj przez Google Flights" : "Zarezerwuj całość"}{b.whole.price ? ` · ${fmtPln(b.whole.price * pax)}` : ""}</a>}
-        {(!b.whole || separate) && <button className={`btn ${b.whole ? "" : "primary"}`} onClick={() => (open ? setOpen(false) : start())}><Icon name="ticket" className="" />Zarezerwuj krok po kroku</button>}
-        <button className="btn ghost" onClick={() => play(Number(getState().selected))}><Icon name="play" className="" />Animacja</button>
+        {b.whole && <a className="btn primary" href={b.whole.url} target="_blank" rel="noreferrer"><Icon name="ticket" className="" />{b.whole.source === "google" ? tr("Rezerwuj przez Google Flights") : tr("Zarezerwuj całość")}{b.whole.price ? ` · ${fmtPln(b.whole.price * pax)}` : ""}</a>}
+        {(!b.whole || separate) && <button className={`btn ${b.whole ? "" : "primary"}`} onClick={() => (open ? setOpen(false) : start())}><Icon name="ticket" className="" />{tr("Zarezerwuj krok po kroku")}</button>}
+        <button className="btn ghost" onClick={() => play(Number(getState().selected))}><Icon name="play" className="" />{tr("Animacja")}</button>
       </div>
       {b.whole?.source === "google" && <GoogleSteps t={t} pax={pax} />}
       {open && (
         <div className="book-list">
-          {separate && <p className="book-warn">Osobne bilety: linia nie gwarantuje przesiadki między nimi, a bagaż odbierasz i nadajesz sam. Kupuj od najbardziej ryzykownego.</p>}
-          {check === "busy" && <p className="book-note pulse">Sprawdzam aktualne ceny wszystkich biletów…</p>}
-          {check === "error" && <p className="book-note">Nie udało się sprawdzić cen na żywo. <button className="link" onClick={() => void recheck()}>Spróbuj ponownie</button></p>}
+          {separate && <p className="book-warn">{tr("Osobne bilety: linia nie gwarantuje przesiadki między nimi, a bagaż odbierasz i nadajesz sam. Kupuj od najbardziej ryzykownego.")}</p>}
+          {check === "busy" && <p className="book-note pulse">{tr("Sprawdzam aktualne ceny wszystkich biletów…")}</p>}
+          {check === "error" && <p className="book-note">{tr("Nie udało się sprawdzić cen na żywo.")} <button className="link" onClick={() => void recheck()}>{tr("Spróbuj ponownie")}</button></p>}
           {check && typeof check === "object" && (check.changed
-            ? <p className="book-warn">Ceny się zmieniły: teraz {check.newTotal != null ? fmtPln(check.newTotal * pax) : "część biletów niedostępna"} zamiast {fmtPln(check.oldTotal * pax)}.</p>
-            : <p className="book-ok">Ceny sprawdzone przed chwilą: bez zmian.</p>)}
+            ? <p className="book-warn">{tr("Ceny się zmieniły: teraz {now} zamiast {old}.", { now: check.newTotal != null ? fmtPln(check.newTotal * pax) : tr("część biletów niedostępna"), old: fmtPln(check.oldTotal * pax) })}</p>
+            : <p className="book-ok">{tr("Ceny sprawdzone przed chwilą: bez zmian.")}</p>)}
           <ol className="book-steps">
             {order.map((k, n) => {
               const done = bought.includes(k.ticket);
@@ -820,20 +845,20 @@ function Booking({ t, pax, sid }: { t: Trip; pax: number; sid: string }) {
               const newPrice = now.length && now.every((x) => x!.now != null) ? now.reduce((a, x) => a + x!.now!, 0) : null;
               return (
                 <li key={k.ticket} className={done ? "done" : ""}>
-                  <label className="bs-check"><input type="checkbox" checked={done} onChange={() => toggle(k.ticket)} aria-label={`Kupiony bilet ${k.from}–${k.to}`} /></label>
+                  <label className="bs-check"><input type="checkbox" checked={done} onChange={() => toggle(k.ticket)} aria-label={tr("Kupiony bilet {route}", { route: `${k.from}–${k.to}` })} /></label>
                   <div className="bs-main">
                     <div className="bs-route">{n + 1}. {tripCity(k.from)} → {tripCity(k.to)} <span className="bs-date">{fmtDate(k.date)}</span></div>
-                    <div className="bs-sub">{k.legs.length > 1 ? `${k.legs.length} loty na jednym bilecie · chroniona przesiadka` : "osobny bilet"} · {SOURCE_PL[k.source] ?? k.source}</div>
+                    <div className="bs-sub">{k.legs.length > 1 ? tr("{flights} na jednym bilecie · chroniona przesiadka", { flights: `${k.legs.length} ${plu(k.legs.length, ["lot", "loty", "lotów"], ["flight", "flights"])}` }) : tr("osobny bilet")} · {tr(SOURCE_PL[k.source] ?? k.source)}</div>
                   </div>
                   <div className="bs-right">
                     <span className="bs-price mono">{newPrice != null && newPrice !== k.price ? <><s>{fmtPln(k.price * pax)}</s> {fmtPln(newPrice * pax)}</> : fmtPln(k.price * pax)}</span>
-                    <a className="bs-link" href={k.url} target="_blank" rel="noreferrer">Otwórz ↗</a>
+                    <a className="bs-link" href={k.url} target="_blank" rel="noreferrer">{tr("Otwórz")} ↗</a>
                   </div>
                 </li>
               );
             })}
           </ol>
-          <div className="book-sum"><span>Zapłacone {fmtPln(paid * pax)}</span><span>Zostało {fmtPln((total - paid) * pax)}</span></div>
+          <div className="book-sum"><span>{tr("Zapłacone {amount}", { amount: fmtPln(paid * pax) })}</span><span>{tr("Zostało {amount}", { amount: fmtPln((total - paid) * pax) })}</span></div>
         </div>
       )}
     </div>
@@ -855,36 +880,36 @@ function TripCard({ t, i, r, pax, anywhere, best, label }: { t: Trip; i: number;
   return (
     <li ref={ref} className={`${on ? "sel" : ""} ${best || label ? "best" : ""}`}>
       <button className="trip" onClick={() => select(i)} aria-expanded={on}>
-        {(best || label) && <div className="tr-badge">{label ?? "Najlepsza oferta"}</div>}
+        {(best || label) && <div className="tr-badge">{label ?? tr("Najlepsza oferta")}</div>}
         <div className="tr-top">
           <span className="mono tr-price">{fmtPln(t.price * pax)}</span>
-          {save !== null && save > 0 && <span className="mono tr-save">{fmtPln(save * pax)} taniej niż Google</span>}
-          {save !== null && save <= 0 && <span className="tr-google">{save === 0 || t.google ? "tyle co Google" : `+${fmtPln(-save * pax)} vs Google`}</span>}
+          {save !== null && save > 0 && <span className="mono tr-save">{tr("{amount} taniej niż Google", { amount: fmtPln(save * pax) })}</span>}
+          {save !== null && save <= 0 && <span className="tr-google">{save === 0 || t.google ? tr("tyle co Google") : tr("{amount} vs Google", { amount: `+${fmtPln(-save * pax)}` })}</span>}
         </div>
         {anywhere && <div className="tr-dest">{destCity(t)}</div>}
         <AbroadLine t={t} />
         <div className="tr-meta">
           <span>{fmtDate(t.outDate)}{t.retDate ? ` – ${fmtDate(t.retDate)}` : ""}</span>
-          <span>{t.travelH} h w drodze</span>
-          <span>{maxConn === 0 ? "bez przesiadek" : `${maxConn} ${maxConn === 1 ? "przesiadka" : maxConn < 5 ? "przesiadki" : "przesiadek"}`}</span>
+          <span>{tr("{h} h w drodze", { h: t.travelH })}</span>
+          <span>{maxConn === 0 ? tr("bez przesiadek") : `${maxConn} ${plu(maxConn, ["przesiadka", "przesiadki", "przesiadek"], ["connection", "connections"])}`}</span>
         </div>
         <div className="tr-tickets">
           {maxConn > 0 || nb > 1
-            ? <span className={`chip ${one ? "ok" : "warn"}`}><Icon name={one ? "shield" : "ticket"} />{one ? "jeden bilet" : `${nb} osobne bilety`}</span>
+            ? <span className={`chip ${one ? "ok" : "warn"}`}><Icon name={one ? "shield" : "ticket"} />{one ? tr("jeden bilet") : `${nb} ${plu(nb, ["osobny bilet", "osobne bilety", "osobnych biletów"], ["separate ticket", "separate tickets"])}`}</span>
             : null}
-          {withBag ? <span className="tr-bag">cena z bagażem rejestrowanym{bagFee > 0 ? <> (w tym bagaż ~<b className="mono">{fmtPln(bagFee * pax)}</b>)</> : null}</span>
-            : bag.bagPrice ? <span className="tr-bag">z bagażem rejestrowanym <b className="mono">{bag.bagEstimated ? "~" : ""}{fmtPln(bag.bagPrice * pax)}</b></span> : null}
+          {withBag ? <span className="tr-bag">{tr("cena z bagażem rejestrowanym")}{bagFee > 0 ? <> ({tr("w tym bagaż")} ~<b className="mono">{fmtPln(bagFee * pax)}</b>)</> : null}</span>
+            : bag.bagPrice ? <span className="tr-bag">{tr("z bagażem rejestrowanym")} <b className="mono">{bag.bagEstimated ? "~" : ""}{fmtPln(bag.bagPrice * pax)}</b></span> : null}
         </div>
       </button>
       {on && <div className="tr-more">
         <div className="tr-step">
-          <button onClick={() => pickTrip(i - 1)} disabled={i === 0} aria-label="Poprzednia trasa"><Icon name="arrow" className="ico flip" /> tańsza</button>
+          <button onClick={() => pickTrip(i - 1)} disabled={i === 0} aria-label={tr("Poprzednia trasa")}><Icon name="arrow" className="ico flip" /> {tr("tańsza")}</button>
           <span className="mono">{i + 1} / {r.trips.length}</span>
-          <button onClick={() => pickTrip(i + 1)} disabled={i >= r.trips.length - 1} aria-label="Następna trasa">droższa <Icon name="arrow" className="ico" /></button>
+          <button onClick={() => pickTrip(i + 1)} disabled={i >= r.trips.length - 1} aria-label={tr("Następna trasa")}>{tr("droższa")} <Icon name="arrow" className="ico" /></button>
         </div>
         <RouteLine t={t} />
         <AccessLine t={t} />
-        {savings.length > 0 && <div className="tr-savings">{savings.slice(0, 2).map((x) => <span key={x.technique + x.label} className="chip ok">{x.label}: −{fmtPln(x.pln * pax)}</span>)}</div>}
+        {savings.length > 0 && <div className="tr-savings">{savings.slice(0, 2).map((x) => <span key={x.technique + x.label} className="chip ok">{tx(x.label)}: −{fmtPln(x.pln * pax)}</span>)}</div>}
         <Booking t={t} pax={pax} sid={followed} />
         <Timeline t={t} pax={pax} />
       </div>}
@@ -903,8 +928,8 @@ function OneTicket({ r, shown, pax, anywhere }: { r: SearchResult; shown: { t: T
   const extra = hit.t.price - shown[0].t.price;
   return (
     <div className="one-ticket">
-      <p className="ot-head">Wolisz bez ryzyka przesiadki? Na jednym bilecie {extra > 0 ? <>drożej o <b className="mono">{fmtPln(extra * pax)}</b></> : "w tej samej cenie"}:</p>
-      <ol className="trips"><TripCard t={hit.t} i={hit.i} r={r} pax={pax} anywhere={anywhere} best={false} label="Na jednym bilecie" /></ol>
+      <p className="ot-head">{extra > 0 ? rich("Wolisz bez ryzyka przesiadki? Na jednym bilecie drożej o {extra}:", { extra: <b className="mono">{fmtPln(extra * pax)}</b> }) : tr("Wolisz bez ryzyka przesiadki? Na jednym bilecie w tej samej cenie:")}</p>
+      <ol className="trips"><TripCard t={hit.t} i={hit.i} r={r} pax={pax} anywhere={anywhere} best={false} label={tr("Na jednym bilecie")} /></ol>
     </div>
   );
 }
@@ -917,7 +942,7 @@ function DestRowButton({ d, k, pax, onPick, sub, chev, open }: { d: DestRow; k: 
       <span className="d-rank">{t ? k + 1 : "–"}</span>
       <span className="d-main">
         <span className="d-city">{sub ? countryName(ccOf(d.code)) : d.city}{!sub && <span className="code">{d.code}</span>}</span>
-        <span className="d-sub">{t ? `${sub ? `${sub} · ` : ""}${fmtDate(t.outDate)}${t.retDate ? ` – ${fmtDate(t.retDate)}` : ""} · ${conns === 0 ? "bez przesiadek" : `${conns} przes.`} · ${t.travelH} h` : d.checked ? "sprawdzone, brak trasy w oknie dat" : "jeszcze nie sprawdzone"}</span>
+        <span className="d-sub">{t ? `${sub ? `${sub} · ` : ""}${fmtDate(t.outDate)}${t.retDate ? ` – ${fmtDate(t.retDate)}` : ""} · ${conns === 0 ? tr("bez przesiadek") : tr("{n} przes.", { n: conns })} · ${t.travelH} h` : d.checked ? tr("sprawdzone, brak trasy w oknie dat") : tr("jeszcze nie sprawdzone")}</span>
       </span>
       <span className="d-right">
         <span className="d-price mono">{t ? fmtPln(t.price * pax) : "—"}</span>
@@ -948,14 +973,14 @@ function Destinations({ rows, pax, onPick, countries, openCc, setOpenCc }: { row
         const open = openCc === g.cc, best = g.rows[0], more = g.rows.filter((d) => d.best).length - 1;
         return (
           <li key={g.cc} id={`dc-${g.cc}`} className={open ? "open" : ""}>
-            <DestRowButton d={best} k={k} pax={pax} sub={`${best.city}${more > 0 ? ` · +${more} ${more === 1 ? "miasto" : more < 5 ? "miasta" : "miast"}` : ""}`} chev open={open} onPick={() => setOpenCc(open ? null : g.cc)} />
+            <DestRowButton d={best} k={k} pax={pax} sub={`${best.city}${more > 0 ? ` · +${plural(more, "miasto", "miasta", "miast")}` : ""}`} chev open={open} onPick={() => setOpenCc(open ? null : g.cc)} />
             {open && (
               <ul className="any-cities">
                 {g.rows.map((d) => (
                   <li key={d.city}>
                     <button className="any-city" onClick={() => d.best && onPick(d.city)} disabled={!d.best}>
                       <span className="ac-name">{d.city} <span className="ar-code">{d.code}</span></span>
-                      <span className="ac-when">{d.best ? `${fmtDate(d.best.outDate)}${d.best.retDate ? ` – ${fmtDate(d.best.retDate)}` : ""} · ${d.best.travelH} h${d.n > 1 ? ` · ${plural(d.n, "wariant", "warianty", "wariantów")}` : ""}` : d.checked ? "brak trasy w oknie dat" : "nie sprawdzone"}</span>
+                      <span className="ac-when">{d.best ? `${fmtDate(d.best.outDate)}${d.best.retDate ? ` – ${fmtDate(d.best.retDate)}` : ""} · ${d.best.travelH} h${d.n > 1 ? ` · ${plural(d.n, "wariant", "warianty", "wariantów")}` : ""}` : d.checked ? tr("brak trasy w oknie dat") : tr("nie sprawdzone")}</span>
                       <span className={`ac-price mono ${d.best ? "" : "est"}`}>{d.best ? fmtPln(d.best.price * pax) : "—"}</span>
                     </button>
                   </li>
@@ -1021,30 +1046,30 @@ function Results() {
   // a city of a region: its own full search; the trips found so far are under "wszystkie trasy"
   const pick = (c: string) => { const d = rows.find((x) => x.city === c); if (d) void searchCity(c, d.code); };
   return (
-    <section className={`results glass ${open ? "open" : "closed"}`} aria-label="Wyniki" hidden={journey !== "none" && !inline}>
+    <section className={`results glass ${open ? "open" : "closed"}`} aria-label={tr("Wyniki")} hidden={journey !== "none" && !inline}>
       <button className="r-handle" onClick={() => setState((s) => ({ panelOpen: !s.panelOpen }))} aria-expanded={open}>
         <span className="r-grip" />
-        <span className="r-title">{params ? `${params.originLabel} → ${params.destLabel}` : "Wyniki"}</span>
-        <span className="mono">{n ? `${multi ? (countries ? `${plural(byCountry(rows).filter((g) => g.rows[0].best).length, "kraj", "kraje", "krajów")}, ` : "") + plural(rows.filter((d) => d.best).length, "miasto", "miasta", "miast") : plural(n, "trasa", "trasy", "tras")} · od ${fmtPln(r!.trips[0].price * pax)}` : ""}</span>
+        <span className="r-title">{params ? `${params.originLabel} → ${params.destLabel}` : tr("Wyniki")}</span>
+        <span className="mono">{n ? `${multi ? (countries ? `${plural(byCountry(rows).filter((g) => g.rows[0].best).length, "kraj", "kraje", "krajów")}, ` : "") + plural(rows.filter((d) => d.best).length, "miasto", "miasta", "miast") : plural(n, "trasa", "trasy", "tras")} · ${tr("od {price}", { price: fmtPln(r!.trips[0].price * pax) })}` : ""}</span>
         <span className="r-chev"><Icon name="chevron" className="" /></span>
       </button>
       {open && (
         <div className="r-body scroll">
           <Progress />
           {r && <>
-            {pax > 1 && <p className="r-note">Ceny za {pax} osoby (cena za osobę × {pax}).</p>}
+            {pax > 1 && <p className="r-note">{tr("Ceny za {people} (cena za osobę × {n}).", { people: `${pax} ${plu(pax, ["osobę", "osoby", "osób"], ["person", "people"])}`, n: pax })}</p>}
             <CheaperDates />
-            {!r.trips.length && !r.paused && <p className="r-note">Brak trasy w tym oknie dat. Spróbuj szerszego zakresu dat albo dłuższego czasu podróży.</p>}
+            {!r.trips.length && !r.paused && <p className="r-note">{tr("Brak trasy w tym oknie dat. Spróbuj szerszego zakresu dat albo dłuższego czasu podróży.")}</p>}
             {multi && n > 0 && (
               <div className="r-views">
-                <div className="seg" role="tablist" aria-label="Widok wyników">
-                  <button role="tab" aria-selected={view === "dest"} className={view === "dest" ? "on" : ""} onClick={() => { setView("dest"); setState({ selected: null }); }}>Kierunki</button>
-                  <button role="tab" aria-selected={view === "all"} className={view === "all" ? "on" : ""} onClick={() => setView("all")}>Wszystkie trasy</button>
+                <div className="seg" role="tablist" aria-label={tr("Widok wyników")}>
+                  <button role="tab" aria-selected={view === "dest"} className={view === "dest" ? "on" : ""} onClick={() => { setView("dest"); setState({ selected: null }); }}>{tr("Kierunki")}</button>
+                  <button role="tab" aria-selected={view === "all"} className={view === "all" ? "on" : ""} onClick={() => setView("all")}>{tr("Wszystkie trasy")}</button>
                 </div>
               </div>
             )}
             {multi && view === "dest" ? <Destinations rows={rows} pax={pax} onPick={pick} countries={countries} openCc={openCc} setOpenCc={setOpenCc} /> : <>
-              {city && <div className="r-filter"><Icon name="pin" /><span>Trasy do: <b>{city}</b> · {shown.length}</span><button onClick={() => { setCity(null); setState({ selected: null }); }}>wszystkie miasta</button></div>}
+              {city && <div className="r-filter"><Icon name="pin" /><span>{tr("Trasy do:")} <b>{city}</b> · {shown.length}</span><button onClick={() => { setCity(null); setState({ selected: null }); }}>{tr("wszystkie miasta")}</button></div>}
               {/* the cheapest, then (when it needs separate bookings) the cheapest on one ticket, then the rest */}
               <ol className="trips">
                 {shown.slice(0, 1).map(({ t, i }) => <TripCard key={t.id} t={t} i={i} r={r} pax={pax} anywhere={anywhere || (multi && !city)} best={i === 0} />)}
@@ -1056,10 +1081,10 @@ function Results() {
             </>}
             <Reasonable r={r} pax={pax} />
             {(r.summary || r.notes.length > 0) && <details className="r-more">
-              <summary>Szczegóły wyszukiwania</summary>
-              {r.summary && <p className="r-summary">{r.summary}</p>}
+              <summary>{tr("Szczegóły wyszukiwania")}</summary>
+              {r.summary && <p className="r-summary">{tx(r.summary)}</p>}
               <StrategistLine r={r} />
-              {r.notes.filter((nt) => !nt.startsWith("Strateg:")).map((nt) => <p key={nt} className="r-note">{nt}</p>)}
+              {r.notes.filter((nt) => !nt.startsWith("Strateg:")).map((nt) => <p key={nt} className="r-note">{tx(nt)}</p>)}
             </details>}
           </>}
         </div>
@@ -1082,7 +1107,7 @@ function JourneyOverlay() {
     <>
       {phase === "flying" && (
         <div className="j-counter">
-          <span className="caps">Suma</span>
+          <span className="caps">{tr("Suma")}</span>
           <span className="mono"><Counter value={total} /> zł</span>
         </div>
       )}
@@ -1091,11 +1116,11 @@ function JourneyOverlay() {
           <div className="j-card">
             <div className="j-route">{routeCodes(t).map((c) => <div key={c}>{c}</div>)}</div>
             <div className="j-price mono"><Counter value={t.price} /> <span>zł</span></div>
-            <div className={`j-save mono ${save !== null && save < 0 ? "neg" : ""}`}>{save !== null ? `${save >= 0 ? "−" : "+"}${fmtPln(Math.abs(save))} vs Google` : "brak ceny bazowej Google"}</div>
-            {t.estimated && <div className="j-warn">część odcinków ma cenę szacunkową</div>}
+            <div className={`j-save mono ${save !== null && save < 0 ? "neg" : ""}`}>{save !== null ? tr("{amount} vs Google", { amount: `${save >= 0 ? "−" : "+"}${fmtPln(Math.abs(save))}` }) : tr("brak ceny bazowej Google")}</div>
+            {t.estimated && <div className="j-warn">{tr("część odcinków ma cenę szacunkową")}</div>}
             <div className="j-actions">
-              <button onClick={() => play(sel)}>Odtwórz ponownie</button>
-              <button className="primary" onClick={() => setState({ journeyPhase: "none", panelOpen: true })}>Szczegóły trasy</button>
+              <button onClick={() => play(sel)}>{tr("Odtwórz ponownie")}</button>
+              <button className="primary" onClick={() => setState({ journeyPhase: "none", panelOpen: true })}>{tr("Szczegóły trasy")}</button>
             </div>
           </div>
         </div>
@@ -1121,15 +1146,20 @@ function TopForm() {
 }
 
 export default function App() {
+  const lang = useLang();
   useEffect(() => { void refreshPush(); }, []);
+  useEffect(() => setLang(storedLang(), false), []);
   return (
     <main>
       <Scene />
-      <TopForm />
-      <Results />
-      <AnywherePanel onSearch={(f) => void startForm(f)} />
-      <JourneyOverlay />
-      <Radar />
+      {/* everything but the globe re-renders in the new language */}
+      <Fragment key={lang}>
+        <TopForm />
+        <Results />
+        <AnywherePanel onSearch={(f) => void startForm(f)} />
+        <JourneyOverlay />
+        <Radar />
+      </Fragment>
     </main>
   );
 }
@@ -1142,8 +1172,8 @@ function StopoverSlider({ value, disabled, onChange }: { value: number; disabled
   useEffect(() => setV(value), [value]);
   return (
     <label className="stopover">
-      <span>przesiadki do {v === 0 ? "30 h" : `${v} ${v === 1 ? "dnia" : "dni"}`}</span>
-      <input type="range" min={0} max={7} step={1} value={v} disabled={disabled} aria-label="Najdłuższa przesiadka w dniach"
+      <span>{tr("przesiadki do {max}", { max: v === 0 ? "30 h" : `${v} ${plu(v, ["dnia", "dni", "dni"], ["day", "days"])}` })}</span>
+      <input type="range" min={0} max={7} step={1} value={v} disabled={disabled} aria-label={tr("Najdłuższa przesiadka w dniach")}
         onChange={(e) => setV(Number(e.target.value))} onPointerUp={() => v !== value && onChange(v)} onKeyUp={() => v !== value && onChange(v)} />
     </label>
   );
@@ -1167,7 +1197,7 @@ function useRadarOpen() {
 
 function RadarButton() {
   const open = useRadarOpen();
-  return <button className={`radar-btn ${open ? "on" : ""}`} onClick={() => setRadar(!open)}>Radar okazji</button>;
+  return <button className={`radar-btn ${open ? "on" : ""}`} onClick={() => setRadar(!open)}>{tr("Radar okazji")}</button>;
 }
 
 const cityOf = (c: string) => AIRPORT_POS[c]?.city ?? c;
@@ -1179,30 +1209,30 @@ function Radar() {
   const [data, setData] = useState<RadarData | null>(null);
   const [watch, setWatch] = useState("");
   const [err, setErr] = useState("");
-  const load = (s = sort) => fetch(`/api/radar?sort=${s}`).then((r) => r.json()).then(setData).catch(() => setErr("nie udało się wczytać radaru"));
+  const load = (s = sort) => fetch(`/api/radar?sort=${s}`).then((r) => r.json()).then(setData).catch(() => setErr(tr("nie udało się wczytać radaru")));
   useEffect(() => { if (open) void load(); }, [open, sort]);
   if (!open) return null;
   const add = async () => {
     if (!watch.trim()) return;
     const r = await fetch("/api/radar", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ watch }) });
     const j = await r.json();
-    if (!r.ok) setErr(j.error ?? "błąd"); else { setErr(""); setWatch(""); void load(); }
+    if (!r.ok) setErr(j.error ? tx(j.error) : tr("błąd")); else { setErr(""); setWatch(""); void load(); }
   };
   const remove = async (id: number) => { await fetch("/api/radar", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ unwatch: id }) }); void load(); };
   return (
     <section className="radar glass fade-in">
       <div className="rd-head">
-        <div className="caps">radar okazji</div>
+        <div className="caps">{tr("radar okazji")}</div>
         <div className="rd-sort mono">
-          <button className={sort === "price" ? "on" : ""} onClick={() => setSort("price")}>cena</button>
-          <button className={sort === "pct" ? "on" : ""} onClick={() => setSort("pct")}>% poniżej normy</button>
+          <button className={sort === "price" ? "on" : ""} onClick={() => setSort("price")}>{tr("cena")}</button>
+          <button className={sort === "pct" ? "on" : ""} onClick={() => setSort("pct")}>{tr("% poniżej normy")}</button>
         </div>
-        <button className="rd-close caps" onClick={() => setRadar(false)}>zamknij</button>
+        <button className="rd-close caps" onClick={() => setRadar(false)}>{tr("zamknij")}</button>
       </div>
       <div className="rd-body scroll">
-        {!data && !err && <p className="r-note">Wczytuję…</p>}
+        {!data && !err && <p className="r-note">{tr("Wczytuję…")}</p>}
         {err && <p className="r-note">{err}</p>}
-        {data && !data.deals.length && <p className="r-note">Brak aktualnych okazji. Radar skanuje mapę raz dziennie, kanały okazji co 4 godziny.</p>}
+        {data && !data.deals.length && <p className="r-note">{tr("Brak aktualnych okazji. Radar skanuje mapę raz dziennie, kanały okazji co 4 godziny.")}</p>}
         <ol className="rd-list">
           {data?.deals.map((d) => (
             <li key={d.id}>
@@ -1214,24 +1244,24 @@ function Radar() {
                 </div>
                 <div className="rd-sub">
                   {cityOf(d.origin)} → {cityOf(d.dest)}{d.date ? ` · ${fmtDate(d.date)}.${d.date.slice(0, 4)}` : ""}
-                  {d.feederPrice ? <> · + dolot z {d.feederFrom ?? "Polski"} {fmtPln(d.feederPrice)} = <b>{fmtPln(d.total)}</b></> : null}
+                  {d.feederPrice ? <> · + {tr("dolot z {from}", { from: d.feederFrom ?? tr("Polski") })} {fmtPln(d.feederPrice)} = <b>{fmtPln(d.total)}</b></> : null}
                 </div>
-                <div className="rd-meta dim">{d.kind === "anomaly" ? `norma ${fmtPln(d.norm ?? 0)} · ${d.source}` : `${d.source}: ${d.title ?? ""}`}</div>
+                <div className="rd-meta dim">{d.kind === "anomaly" ? `${tr("norma {price}", { price: fmtPln(d.norm ?? 0) })} · ${d.source}` : `${d.source}: ${d.title ?? ""}`}</div>
               </a>
             </li>
           ))}
         </ol>
-        <div className="rd-section caps">obserwowane kierunki (mail przy okazji poniżej 50% normy)</div>
+        <div className="rd-section caps">{tr("obserwowane kierunki (mail przy okazji poniżej 50% normy)")}</div>
         <div className="rd-watch">
-          {data?.watch.map((w) => <span key={w.id} className="mono">{w.label}<button aria-label={`Usuń ${w.label}`} onClick={() => remove(w.id)}>×</button></span>)}
+          {data?.watch.map((w) => <span key={w.id} className="mono">{w.label}<button aria-label={tr("Usuń {label}", { label: w.label })} onClick={() => remove(w.id)}>×</button></span>)}
           <form onSubmit={(e) => { e.preventDefault(); void add(); }}>
-            <input value={watch} onChange={(e) => setWatch(e.target.value)} placeholder="np. Peru, Tajlandia, BKK" aria-label="Dodaj obserwowany kierunek" />
+            <input value={watch} onChange={(e) => setWatch(e.target.value)} placeholder={tr("np. Peru, Tajlandia, BKK")} aria-label={tr("Dodaj obserwowany kierunek")} />
           </form>
         </div>
         {data && Object.keys(data.hubs).length > 0 && <>
-          <div className="rd-section caps">najtańsze huby z Polski (dolot + dalej)</div>
+          <div className="rd-section caps">{tr("najtańsze huby z Polski (dolot + dalej)")}</div>
           {["SAM", "SEA", "SAS", "EAS", "CAR", "NAM"].filter((r) => data.hubs[r]).map((r) => (
-            <div key={r} className="rd-hubs mono"><span className="dim">{REGION_PL[r]}</span> {data.hubs[r].slice(0, 5).map((h) => `${h.hub} ${h.score}`).join(" · ")}</div>
+            <div key={r} className="rd-hubs mono"><span className="dim">{tr(REGION_PL[r])}</span> {data.hubs[r].slice(0, 5).map((h) => `${h.hub} ${h.score}`).join(" · ")}</div>
           ))}
         </>}
       </div>

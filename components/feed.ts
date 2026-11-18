@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 // The live query feed: source questions (their cache keys) turned into short readable lines.
 
 export type FeedLine = { id: number; src: string; tag: string; route: string; dates: string; note: string; from?: string; to?: string; at?: number; hit?: boolean };
@@ -18,18 +20,18 @@ export function feedLine(id: number, key: string, cached: boolean, ms: number, n
   let from: string[] = [], to: string[] = [], dates = "", what = "";
   switch (`${k[0]}:${k[1]}`) {
     case "kiwi:rt": from = codes(k[2]); to = codes(k[3]); dates = `${span(k[4], k[5])} ⇄ ${span(k[6], k[7])}`; break;
-    case "kiwi:ow": from = codes(k[2]); to = codes(k[3]); dates = span(k[4], k[5]); if (k[3] === "ANY") what = "cały świat"; break;
-    case "fr:map": from = codes(k[2]); what = "mapa tras"; break;
+    case "kiwi:ow": from = codes(k[2]); to = codes(k[3]); dates = span(k[4], k[5]); if (k[3] === "ANY") what = t("cały świat"); break;
+    case "fr:map": from = codes(k[2]); what = t("mapa tras"); break;
     case "fr:days": case "wizz:days": from = codes(k[2]); to = codes(k[3]); dates = span(k[4], k[5]); break;
-    case "wizz:map": from = codes(k[2]); what = "mapa tras"; break;
+    case "wizz:map": from = codes(k[2]); what = t("mapa tras"); break;
     case "g:ow3": from = codes(k[2]); to = codes(k[3]); dates = span(k[4]); break;
     case "g:owc3": from = codes(k[2]); to = codes(k[3]); dates = span(k[4]); break;
-    case "g:grid2": case "g:owgrid": case "g:cal": from = codes(k[2]); to = codes(k[3]); dates = span(k[4], k[5]); what = "kalendarz cen"; break;
-    case "avs:days": from = codes(k[2]); to = codes(k[3]); what = "kalendarz cen"; break;
+    case "g:grid2": case "g:owgrid": case "g:cal": from = codes(k[2]); to = codes(k[3]); dates = span(k[4], k[5]); what = t("kalendarz cen"); break;
+    case "avs:days": from = codes(k[2]); to = codes(k[3]); what = t("kalendarz cen"); break;
     case "avs:sched": from = codes(k[2]); to = codes(k[3]); dates = span(k[4], k[5]); break;
-    case "kayak:explore": from = codes(k[2]); dates = `${span(k[3])} ⇄ ${span(k[4])}`; what = "mapa cen"; break;
+    case "kayak:explore": from = codes(k[2]); dates = `${span(k[3])} ⇄ ${span(k[4])}`; what = t("mapa cen"); break;
     default: {
-      if (k[0] === "flix") { what = "autobus"; dates = span(k[3]); break; }
+      if (k[0] === "flix") { what = t("autobus"); dates = span(k[3]); break; }
       // any other question: its airports and first dates, as far as the key shows them
       from = codes(k[2]); to = codes(k[3]);
       const ds = k.filter(isDay);
@@ -38,6 +40,6 @@ export function feedLine(id: number, key: string, cached: boolean, ms: number, n
     }
   }
   const route = from.length || to.length ? `${list(from)}${to.length ? ` → ${list(to)}` : ""}${what ? ` · ${what}` : ""}` : what;
-  const note = cached ? "z pamięci" : `${n !== null ? `${n} wyn. · ` : ""}${ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`}`;
+  const note = cached ? t("z pamięci") : `${n !== null ? `${t("{n} wyn.", { n })} · ` : ""}${ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`}`;
   return { id, src, tag, route, dates, note, from: from[0], to: to[0], hit: cached };
 }

@@ -6,16 +6,18 @@ import type { SearchForm } from "@/lib/parse";
 import type { Suggestion } from "@/lib/suggest";
 import { fmtPln } from "./geo";
 import { setState, useStore } from "./store";
+import { getLang, locale, plural, t, tx, useLang } from "./i18n";
 
-const MONTHS = ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"];
-const MONTHS_SHORT = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"];
-const DOW = ["pn", "wt", "śr", "cz", "pt", "so", "nd"];
+// month and weekday names from Intl in the interface language ("styczeń" / "January", "pn" / "Mo")
+const monthName = (ym: string) => new Intl.DateTimeFormat(locale(), { month: "long", timeZone: "UTC" }).format(new Date(Date.parse(ym.slice(0, 7) + "-01")));
+const DOW_PL = ["pn", "wt", "śr", "cz", "pt", "so", "nd"];
+const dow = () => (getLang() === "pl" ? DOW_PL : Array.from({ length: 7 }, (_, i) => new Intl.DateTimeFormat(locale(), { weekday: "short", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 1 + i))).slice(0, 2)));
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (s: string, n: number) => iso(new Date(Date.parse(s) + n * 86400_000));
 const addMonths = (ym: string, n: number) => { const d = new Date(Date.parse(ym + "-01")); d.setUTCMonth(d.getUTCMonth() + n); return iso(d).slice(0, 7); };
 const monthEnd = (ym: string) => addDays(addMonths(ym, 1) + "-01", -1);
-const fmtD = (s: string) => `${Number(s.slice(8, 10))} ${MONTHS_SHORT[Number(s.slice(5, 7)) - 1]}`;
+const fmtD = (s: string) => new Intl.DateTimeFormat(locale(), { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(Date.parse(s.slice(0, 10)))).replace(/\.$/, "");
 const short = (n: number) => (n >= 10000 ? `${Math.round(n / 1000)}k` : String(Math.round(n)));
 
 export type FormState = SearchForm & { months: string[]; maxAccessH?: number };
@@ -80,7 +82,7 @@ function PlaceInput({ label, value, onChange, placeholder, autoFocus, extra }: {
           {items.map((s, i) => (
             <li key={s.kind + s.value} id={`${id}-o${i}`} role="option" aria-selected={i === hi} className={i === hi ? "on" : ""}
               onMouseDown={(e) => { e.preventDefault(); pick(s); }} onMouseEnter={() => setHi(i)}>
-              <span className={`ac-kind k-${s.kind}`}>{s.kind === "airport" ? s.value : s.kind === "country" ? "kraj" : s.kind === "region" ? "region" : s.kind === "city" ? "miasto" : "✦"}</span>
+              <span className={`ac-kind k-${s.kind}`}>{s.kind === "airport" ? s.value : s.kind === "country" ? t("kraj") : s.kind === "region" ? t("region") : s.kind === "city" ? t("miasto") : "✦"}</span>
               <span className="ac-main">{s.kind === "airport" ? s.label.replace(/ [A-Z]{3}$/, "") : s.label}</span>
               <span className="ac-sub">{s.sub}</span>
             </li>
@@ -109,10 +111,10 @@ export function useCalendar(f: FormState, open: boolean, start: string, months: 
         if (dead) return;
         const days: Record<string, number> = {};
         for (const d of j.days ?? []) days[d.date] = d.price;
-        setCal({ days, loading: false, error: j.error ?? (j.days?.length ? null : "brak cen w kalendarzu Google"), key });
+        setCal({ days, loading: false, error: j.error ?? (j.days?.length ? null : t("brak cen w kalendarzu Google")), key });
         setState((s) => ({ calendar: { ...s.calendar, ...days } }));
       })
-      .catch(() => { if (!dead) setCal({ days: {}, loading: false, error: "kalendarz niedostępny", key }); });
+      .catch(() => { if (!dead) setCal({ days: {}, loading: false, error: t("kalendarz niedostępny"), key }); });
     return () => { dead = true; };
   }, [open, key]); // eslint-disable-line react-hooks/exhaustive-deps
   return cal;
@@ -134,16 +136,16 @@ export function MonthGrid({ ym, days, cls, sel, onPick, min }: { ym: string; day
   const n = Number(monthEnd(ym).slice(8, 10));
   return (
     <div className="cal-month">
-      <div className="cal-title">{MONTHS[Number(ym.slice(5, 7)) - 1]} {ym.slice(0, 4)}</div>
+      <div className="cal-title">{monthName(ym)} {ym.slice(0, 4)}</div>
       <div className="cal-grid">
-        {DOW.map((d) => <span key={d} className="cal-dow">{d}</span>)}
+        {dow().map((d) => <span key={d} className="cal-dow">{d}</span>)}
         {Array.from({ length: lead }, (_, i) => <span key={"l" + i} />)}
         {Array.from({ length: n }, (_, i) => {
           const d = `${ym}-${String(i + 1).padStart(2, "0")}`;
           const p = days[d];
           const off = d < min;
           return (
-            <button key={d} type="button" disabled={off} className={`cal-day ${sel(d)} ${p ? cls(p) : ""}`} onClick={() => onPick(d)} aria-label={`${fmtD(d)}${p ? `, od ${p} zł` : ""}`}>
+            <button key={d} type="button" disabled={off} className={`cal-day ${sel(d)} ${p ? cls(p) : ""}`} onClick={() => onPick(d)} aria-label={`${fmtD(d)}${p ? t(", od {price} zł", { price: p }) : ""}`}>
               <span className="cd-n">{i + 1}</span>
               <span className="cd-p mono">{p ? short(p) : off ? "" : "·"}</span>
             </button>
@@ -161,8 +163,8 @@ export function PriceChart({ days, sel, onPick }: { days: Record<string, number>
   const W = 100 / list.length;
   return (
     <div className="chart">
-      <div className="chart-head"><span>ceny według daty wylotu</span><span className="mono">{fmtPln(min)} – {fmtPln(max)}</span></div>
-      <svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Wykres cen według daty wylotu">
+      <div className="chart-head"><span>{t("ceny według daty wylotu")}</span><span className="mono">{fmtPln(min)} – {fmtPln(max)}</span></div>
+      <svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label={t("Wykres cen według daty wylotu")}>
         {list.map(([d, p], i) => {
           const h = 6 + ((p - min) / Math.max(1, max - min)) * 32;
           return <rect key={d} x={i * W + W * 0.15} width={W * 0.7} y={40 - h} height={h} className={d === sel ? "bar sel" : p === min ? "bar min" : "bar"} onClick={() => onPick(d)}><title>{fmtD(d)}: {fmtPln(p)}</title></rect>;
@@ -179,8 +181,8 @@ function DateGrid({ f, around }: { f: FormState; around: string }) {
     fetch("/api/calendar", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ form: toSearchForm({ ...f, dateMode: "exact" }), grid: around }) })
       .then((r) => r.json()).then((j) => setCells(j.cells ?? [])).catch(() => setCells([]));
   }, [around]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!cells) return <p className="cal-note">Wczytuję siatkę dat…</p>;
-  if (!cells.length) return <p className="cal-note">Brak danych do siatki dat.</p>;
+  if (!cells) return <p className="cal-note">{t("Wczytuję siatkę dat…")}</p>;
+  if (!cells.length) return <p className="cal-note">{t("Brak danych do siatki dat.")}</p>;
   const outs = [...new Set(cells.map((c) => c.out))].sort().slice(0, 15);
   const stays = [...new Set(cells.map((c) => Math.round((Date.parse(c.ret) - Date.parse(c.out)) / 86400_000)))].sort((a, b) => a - b);
   const map = new Map(cells.map((c) => [c.out + "|" + Math.round((Date.parse(c.ret) - Date.parse(c.out)) / 86400_000), c.price]));
@@ -188,7 +190,7 @@ function DateGrid({ f, around }: { f: FormState; around: string }) {
   return (
     <div className="dgrid scroll">
       <table>
-        <thead><tr><th>wylot \ dni</th>{stays.map((s) => <th key={s} className="mono">{s}</th>)}</tr></thead>
+        <thead><tr><th>{t("wylot \\ dni")}</th>{stays.map((s) => <th key={s} className="mono">{s}</th>)}</tr></thead>
         <tbody>
           {outs.map((o) => (
             <tr key={o}><th>{fmtD(o)}</th>{stays.map((s) => { const p = map.get(o + "|" + s); return <td key={s} className={`mono ${p ? cls(p) : ""}`}>{p ? short(p) : ""}</td>; })}</tr>
@@ -202,9 +204,9 @@ function DateGrid({ f, around }: { f: FormState; around: string }) {
 function StayRange({ f, set }: { f: FormState; set: (p: Partial<FormState>) => void }) {
   return (
     <div className="stay">
-      <span>pobyt <b className="mono">{f.stayMin}–{f.stayMax}</b> dni</span>
-      <input type="range" min={1} max={60} value={f.stayMin} aria-label="Najkrótszy pobyt" onChange={(e) => { const v = Number(e.target.value); set({ stayMin: v, stayMax: Math.max(v, f.stayMax ?? v) }); }} />
-      <input type="range" min={1} max={60} value={f.stayMax} aria-label="Najdłuższy pobyt" onChange={(e) => { const v = Number(e.target.value); set({ stayMax: v, stayMin: Math.min(v, f.stayMin ?? v) }); }} />
+      <span>{t("pobyt")} <b className="mono">{f.stayMin}–{f.stayMax}</b> {t("dni")}</span>
+      <input type="range" min={1} max={60} value={f.stayMin} aria-label={t("Najkrótszy pobyt")} onChange={(e) => { const v = Number(e.target.value); set({ stayMin: v, stayMax: Math.max(v, f.stayMax ?? v) }); }} />
+      <input type="range" min={1} max={60} value={f.stayMax} aria-label={t("Najdłuższy pobyt")} onChange={(e) => { const v = Number(e.target.value); set({ stayMax: v, stayMin: Math.min(v, f.stayMin ?? v) }); }} />
     </div>
   );
 }
@@ -231,17 +233,17 @@ function DatePanel({ f, set, close }: { f: FormState; set: (p: Partial<FormState
     if (rt && f.dateMode === "exact") setPickRet(true);
   };
   return (
-    <div className="datepanel glass-solid" role="dialog" aria-label="Daty">
+    <div className="datepanel glass-solid" role="dialog" aria-label={t("Daty")}>
       <div className="seg" role="tablist">
         {([["exact", "konkretne"], ["days", "±3 dni"], ["month", "cały miesiąc"], ["any6", "kiedykolwiek (6 mies.)"]] as const).map(([m, l]) => (
-          <button key={m} type="button" role="tab" aria-selected={f.dateMode === m} className={f.dateMode === m ? "on" : ""} onClick={() => set({ dateMode: m })}>{l}</button>
+          <button key={m} type="button" role="tab" aria-selected={f.dateMode === m} className={f.dateMode === m ? "on" : ""} onClick={() => set({ dateMode: m })}>{t(l)}</button>
         ))}
       </div>
       {(f.dateMode === "exact" || f.dateMode === "days") && <>
         <div className="cal-nav">
-          <button type="button" onClick={() => setView(addMonths(view, -1))} disabled={view <= min.slice(0, 7)} aria-label="Poprzedni miesiąc">‹</button>
-          <span className="cal-hint">{cal.loading ? "wczytuję ceny…" : cal.error ? cal.error : rt && f.dateMode === "exact" ? (pickRet ? "wybierz dzień powrotu" : "wybierz dzień wylotu") : "najniższa cena pod każdym dniem (Google, zł/os.)"}</span>
-          <button type="button" onClick={() => setView(addMonths(view, 1))} aria-label="Następny miesiąc">›</button>
+          <button type="button" onClick={() => setView(addMonths(view, -1))} disabled={view <= min.slice(0, 7)} aria-label={t("Poprzedni miesiąc")}>‹</button>
+          <span className="cal-hint">{cal.loading ? t("wczytuję ceny…") : cal.error ? tx(cal.error) : rt && f.dateMode === "exact" ? (pickRet ? t("wybierz dzień powrotu") : t("wybierz dzień wylotu")) : t("najniższa cena pod każdym dniem (Google, zł/os.)")}</span>
+          <button type="button" onClick={() => setView(addMonths(view, 1))} aria-label={t("Następny miesiąc")}>›</button>
         </div>
         <div className="cal-months">
           <MonthGrid ym={view} days={cal.days} cls={cls} sel={sel} onPick={pick} min={min} />
@@ -250,7 +252,7 @@ function DatePanel({ f, set, close }: { f: FormState; set: (p: Partial<FormState
         <PriceChart days={Object.fromEntries(Object.entries(cal.days).filter(([d]) => d.slice(0, 7) === view || d.slice(0, 7) === addMonths(view, 1)))} sel={f.dateFrom} onPick={pick} />
       </>}
       {f.dateMode === "month" && <>
-        <div className="cal-hint">{tiles.loading ? "wczytuję ceny miesięcy…" : "najniższa cena w miesiącu (Google, zł/os.) · zaznacz jeden lub kilka"}</div>
+        <div className="cal-hint">{tiles.loading ? t("wczytuję ceny miesięcy…") : t("najniższa cena w miesiącu (Google, zł/os.) · zaznacz jeden lub kilka")}</div>
         <div className="tiles">
           {months6.map((m) => {
             const p = monthMin(m);
@@ -258,32 +260,32 @@ function DatePanel({ f, set, close }: { f: FormState; set: (p: Partial<FormState
             return (
               <button key={m} type="button" className={`tile ${on ? "on" : ""} ${p ? tileCls(p) : ""}`} aria-pressed={on}
                 onClick={() => set({ months: on ? (f.months.length > 1 ? f.months.filter((x) => x !== m) : f.months) : [...f.months, m].sort() })}>
-                <span className="t-m">{MONTHS[Number(m.slice(5, 7)) - 1]}</span>
+                <span className="t-m">{monthName(m)}</span>
                 <span className="t-y">{m.slice(0, 4)}</span>
-                <span className="t-p mono">{p ? `od ${fmtPln(p)}` : tiles.loading ? "…" : "—"}</span>
+                <span className="t-p mono">{p ? t("od {price}", { price: fmtPln(p) }) : tiles.loading ? "…" : "—"}</span>
               </button>
             );
           })}
         </div>
       </>}
-      {f.dateMode === "any6" && <p className="cal-note">Dowolny wylot od jutra do {fmtD(addDays(min, 181))} {addDays(min, 181).slice(0, 4)}. Silnik sprawdza całe okno.</p>}
+      {f.dateMode === "any6" && <p className="cal-note">{t("Dowolny wylot od jutra do {date} {year}. Silnik sprawdza całe okno.", { date: fmtD(addDays(min, 181)), year: addDays(min, 181).slice(0, 4) })}</p>}
       {rt && f.dateMode !== "exact" && <StayRange f={f} set={set} />}
       {rt && (f.dateMode === "exact" || f.dateMode === "days") && f.dateFrom && (
         <div className="grid-toggle">
-          <button type="button" className="link" onClick={() => setGrid(!grid)}>{grid ? "ukryj siatkę dat" : "siatka dat: wylot × długość pobytu"}</button>
+          <button type="button" className="link" onClick={() => setGrid(!grid)}>{grid ? t("ukryj siatkę dat") : t("siatka dat: wylot × długość pobytu")}</button>
           {grid && <DateGrid f={f} around={f.dateFrom} />}
         </div>
       )}
-      <div className="dp-foot"><button type="button" className="btn" onClick={close}>gotowe</button></div>
+      <div className="dp-foot"><button type="button" className="btn" onClick={close}>{t("gotowe")}</button></div>
     </div>
   );
 }
 
 export function dateSummary(f: FormState) {
-  if (f.dateMode === "any6") return "kiedykolwiek w 6 mies.";
-  if (f.dateMode === "month") return f.months.map((m) => `${MONTHS[Number(m.slice(5, 7)) - 1]}`).join(", ") + ` ${f.months[f.months.length - 1]?.slice(0, 4) ?? ""}`;
+  if (f.dateMode === "any6") return t("kiedykolwiek w 6 mies.");
+  if (f.dateMode === "month") return f.months.map(monthName).join(", ") + ` ${f.months[f.months.length - 1]?.slice(0, 4) ?? ""}`;
   const base = f.type !== "ow" && f.dateMode === "exact" && f.retDate ? `${fmtD(f.dateFrom)} – ${fmtD(f.retDate)}` : fmtD(f.dateFrom);
-  return f.dateMode === "days" ? `${base} ±3 dni` : base;
+  return f.dateMode === "days" ? `${base} ${t("±3 dni")}` : base;
 }
 
 // ---------------------------------------------------------------- the form
@@ -297,6 +299,7 @@ export function SearchFormPanel({ onSearch, onAsk, busy, hidden }: { onSearch: (
   const set = (p: Partial<FormState>) => setF((x) => ({ ...x, ...p }));
   const formRef = useRef<HTMLFormElement>(null);
   const phase = useStore((s) => s.phase);
+  useLang(); // re-render the labels when the language switches
   // the result panel sits below the form: publish the form's height
   useEffect(() => {
     const el = formRef.current?.parentElement;
@@ -321,88 +324,88 @@ export function SearchFormPanel({ onSearch, onAsk, busy, hidden }: { onSearch: (
     <div className={`topform glass ${hidden ? "hidden" : ""} ${phase === "idle" ? "idle" : ""}`}>
       <form ref={formRef} onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <div className="f-row1">
-          <div className="seg small" role="radiogroup" aria-label="Typ podróży">
-            {([["rt", "tam i z powrotem"], ["ow", "w jedną stronę"], ["oj", "open-jaw"]] as const).map(([t, l]) => (
-              <button key={t} type="button" role="radio" aria-checked={f.type === t} className={f.type === t ? "on" : ""} onClick={() => set({ type: t })}>{l}</button>
+          <div className="seg small" role="radiogroup" aria-label={t("Typ podróży")}>
+            {([["rt", "tam i z powrotem"], ["ow", "w jedną stronę"], ["oj", "open-jaw"]] as const).map(([ty, l]) => (
+              <button key={ty} type="button" role="radio" aria-checked={f.type === ty} className={f.type === ty ? "on" : ""} onClick={() => set({ type: ty })}>{t(l)}</button>
             ))}
           </div>
           <label className="f-inline">
-            <select value={f.pax} onChange={(e) => set({ pax: Number(e.target.value) })} aria-label="Liczba osób">
-              {Array.from({ length: 9 }, (_, i) => <option key={i} value={i + 1}>{i + 1} {i === 0 ? "osoba" : i < 4 ? "osoby" : "osób"}</option>)}
+            <select value={f.pax} onChange={(e) => set({ pax: Number(e.target.value) })} aria-label={t("Liczba osób")}>
+              {Array.from({ length: 9 }, (_, i) => <option key={i} value={i + 1}>{i + 1} {plural(i + 1, ["osoba", "osoby", "osób"], ["person", "people"])}</option>)}
             </select>
           </label>
           {/* with a checked bag the engine adds each airline's bag fee to every ticket and finds the cheapest total */}
           <label className="f-inline">
-            <select value={f.baggage} onChange={(e) => set({ baggage: e.target.value as "cabin" | "checked" })} aria-label="Bagaż">
-              <option value="cabin">tylko podręczny</option>
-              <option value="checked">z bagażem rejestrowanym</option>
+            <select value={f.baggage} onChange={(e) => set({ baggage: e.target.value as "cabin" | "checked" })} aria-label={t("Bagaż")}>
+              <option value="cabin">{t("tylko podręczny")}</option>
+              <option value="checked">{t("z bagażem rejestrowanym")}</option>
             </select>
           </label>
           {/* how long to dig: the quick search (~12 min), an hour of research, or until the optimum is proven */}
           <label className="f-inline">
-            <select value={f.depth === "deep" ? (f.researchMin ? "hour" : "deep") : "fast"} aria-label="Czas szukania"
+            <select value={f.depth === "deep" ? (f.researchMin ? "hour" : "deep") : "fast"} aria-label={t("Czas szukania")}
               onChange={(e) => {
                 const v = e.target.value;
                 const deep = { depth: "deep" as const, maxTripH: Math.min(f.maxTripH ?? 72, 72), stopoverDays: Math.min(f.stopoverDays ?? 3, 3) };
                 set(v === "fast" ? { depth: "fast", researchMin: undefined } : v === "hour" ? { ...deep, researchMin: 60 } : { ...deep, researchMin: undefined });
               }}>
-              <option value="fast">szybko · ~12 min</option>
-              <option value="hour">research · ~1 h</option>
-              <option value="deep">do skutku · godziny</option>
+              <option value="fast">{t("szybko · ~12 min")}</option>
+              <option value="hour">{t("research · ~1 h")}</option>
+              <option value="deep">{t("do skutku · godziny")}</option>
             </select>
           </label>
-          <button type="button" className={`more-btn ${more ? "on" : ""}`} onClick={() => setMore(!more)} aria-expanded={more}>Więcej opcji</button>
+          <button type="button" className={`more-btn ${more ? "on" : ""}`} onClick={() => setMore(!more)} aria-expanded={more}>{t("Więcej opcji")}</button>
         </div>
         {ask ? (
           <div className="f-row2">
             <div className="f-field f-q">
-              <label className="f-label" htmlFor="nlq">zapytanie</label>
-              <input id="nlq" value={q} onChange={(e) => setQ(e.target.value)} placeholder="z Polski do Peru, luty, 2–3 tygodnie" spellCheck={false}
+              <label className="f-label" htmlFor="nlq">{t("zapytanie")}</label>
+              <input id="nlq" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("z Polski do Peru, luty, 2–3 tygodnie")} title={t("zapytanie po polsku")} spellCheck={false}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (q.trim() && !busy) onAsk(q.trim()); } }} />
             </div>
-            <button type="button" className="btn primary" disabled={busy || !q.trim()} onClick={() => onAsk(q.trim())}>{busy ? "liczę…" : "szukaj"}</button>
+            <button type="button" className="btn primary" disabled={busy || !q.trim()} onClick={() => onAsk(q.trim())}>{busy ? t("liczę…") : t("szukaj")}</button>
           </div>
         ) : (
           <div className="f-row2">
-            <PlaceInput label="skąd" value={f.from} onChange={(v) => set({ from: v })} placeholder="miasto, lotnisko, kraj"
+            <PlaceInput label={t("skąd")} value={f.from} onChange={(v) => set({ from: v })} placeholder={t("miasto, lotnisko, kraj")}
               extra={/* "tylko stąd": only the airports of the typed city or country, none around it (no Berlin for Polska) */
-                <label className={`f-strict ${f.strict ? "on" : ""}`} title="Tylko lotniska wpisanego miasta lub kraju, bez okolicznych (np. Berlin, Praga, Budapeszt dla Polski)">
-                  <input type="checkbox" checked={f.strict === true} onChange={(e) => set({ strict: e.target.checked })} />tylko stąd
+                <label className={`f-strict ${f.strict ? "on" : ""}`} title={t("Tylko lotniska wpisanego miasta lub kraju, bez okolicznych (np. Berlin, Praga, Budapeszt dla Polski)")}>
+                  <input type="checkbox" checked={f.strict === true} onChange={(e) => set({ strict: e.target.checked })} />{t("tylko stąd")}
                 </label>} />
-            <button type="button" className="swap" aria-label="Zamień skąd i dokąd" onClick={() => set({ from: f.to, to: f.from })}>⇄</button>
-            <PlaceInput label={f.type === "oj" ? "przylot do" : "dokąd"} value={f.to} onChange={(v) => set({ to: v })} placeholder="miasto, kraj, region, gdziekolwiek" />
-            {f.type === "oj" && <PlaceInput label="powrót z" value={f.toRet ?? ""} onChange={(v) => set({ toRet: v })} placeholder="miasto, kraj" />}
+            <button type="button" className="swap" aria-label={t("Zamień skąd i dokąd")} onClick={() => set({ from: f.to, to: f.from })}>⇄</button>
+            <PlaceInput label={f.type === "oj" ? t("przylot do") : t("dokąd")} value={f.to} onChange={(v) => set({ to: v })} placeholder={t("miasto, kraj, region, gdziekolwiek")} />
+            {f.type === "oj" && <PlaceInput label={t("powrót z")} value={f.toRet ?? ""} onChange={(v) => set({ toRet: v })} placeholder={t("miasto, kraj")} />}
             <div className="f-field f-dates">
-              <span className="f-label">daty</span>
-              <button type="button" className="f-datebtn" aria-expanded={dates} onClick={() => setDates(!dates)}>{dateSummary(f)}{f.type !== "ow" && f.dateMode !== "exact" ? <span className="dim"> · {f.stayMin}–{f.stayMax} dni</span> : null}</button>
+              <span className="f-label">{t("daty")}</span>
+              <button type="button" className="f-datebtn" aria-expanded={dates} onClick={() => setDates(!dates)}>{dateSummary(f)}{f.type !== "ow" && f.dateMode !== "exact" ? <span className="dim"> · {t("{min}–{max} dni", { min: f.stayMin ?? "", max: f.stayMax ?? "" })}</span> : null}</button>
             </div>
-            <button type="submit" className="btn primary" disabled={busy || !f.to.trim()}>{busy ? "liczę…" : "szukaj"}</button>
+            <button type="submit" className="btn primary" disabled={busy || !f.to.trim()}>{busy ? t("liczę…") : t("szukaj")}</button>
           </div>
         )}
         {dates && !ask && <DatePanel f={f} set={set} close={() => setDates(false)} />}
         {more && (
           <div className="f-more">
             <div className="fm-group">
-              <label className="chk"><input type="checkbox" checked={f.access !== false} onChange={(e) => set({ access: e.target.checked })} /> licz dojazd z</label>
-              <input className="f-home" value={f.home ?? ""} disabled={f.access === false} onChange={(e) => set({ home: e.target.value })} aria-label="Miasto startowe" size={Math.max(6, (f.home ?? "").length)} />
+              <label className="chk"><input type="checkbox" checked={f.access !== false} onChange={(e) => set({ access: e.target.checked })} /> {t("licz dojazd z")}</label>
+              <input className="f-home" value={f.home ?? ""} disabled={f.access === false} onChange={(e) => set({ home: e.target.value })} aria-label={t("Miasto startowe")} size={Math.max(6, (f.home ?? "").length)} />
             </div>
             <div className="fm-group">
-              <span className="fm-k">Max dojazd do lotniska</span>
-              <div className="seg small" role="radiogroup" aria-label="Maksymalny czas dojazdu do lotniska">
+              <span className="fm-k">{t("Max dojazd do lotniska")}</span>
+              <div className="seg small" role="radiogroup" aria-label={t("Maksymalny czas dojazdu do lotniska")}>
                 {([[2, "2 h"], [4, "4 h"], [6, "6 h"], [0, "bez limitu"]] as const).map(([h, l]) => (
-                  <button key={h} type="button" role="radio" aria-checked={(f.maxAccessH ?? 4) === h} className={(f.maxAccessH ?? 4) === h ? "on" : ""} onClick={() => set({ maxAccessH: h })}>{l}</button>
+                  <button key={h} type="button" role="radio" aria-checked={(f.maxAccessH ?? 4) === h} className={(f.maxAccessH ?? 4) === h ? "on" : ""} onClick={() => set({ maxAccessH: h })}>{t(l)}</button>
                 ))}
               </div>
             </div>
-            <label className="chk"><input type="checkbox" checked={f.abroad === true && !f.strict} disabled={f.strict === true} onChange={(e) => set({ abroad: e.target.checked })} /> + lotniska za granicą</label>
-            <label className="rng">maks. czas podróży <b className="mono">{f.depth === "deep" ? `${Math.min(f.maxTripH ?? 72, 72)} h` : `${Math.round((f.maxTripH ?? 96) / 24)} ${Math.round((f.maxTripH ?? 96) / 24) === 1 ? "dzień" : "dni"}`}</b>
+            <label className="chk"><input type="checkbox" checked={f.abroad === true && !f.strict} disabled={f.strict === true} onChange={(e) => set({ abroad: e.target.checked })} /> {t("+ lotniska za granicą")}</label>
+            <label className="rng">{t("maks. czas podróży")} <b className="mono">{f.depth === "deep" ? `${Math.min(f.maxTripH ?? 72, 72)} h` : `${Math.round((f.maxTripH ?? 96) / 24)} ${Math.round((f.maxTripH ?? 96) / 24) === 1 ? t("dzień") : t("dni")}`}</b>
               {f.depth === "deep"
                 ? <input type="range" min={12} max={72} step={6} value={Math.min(f.maxTripH ?? 72, 72)} onChange={(e) => set({ maxTripH: Number(e.target.value) })} />
                 : <input type="range" min={1} max={7} value={Math.round((f.maxTripH ?? 96) / 24)} onChange={(e) => set({ maxTripH: Number(e.target.value) * 24 })} />}</label>
-            <label className="rng">postoje w mieście do <b className="mono">{f.stopoverDays === 0 ? "30 h" : `${f.stopoverDays ?? 3} dni`}</b>
+            <label className="rng">{t("postoje w mieście do")} <b className="mono">{f.stopoverDays === 0 ? "30 h" : `${f.stopoverDays ?? 3} ${t("dni")}`}</b>
               <input type="range" min={0} max={f.depth === "deep" ? 3 : 7} value={f.stopoverDays ?? 3} onChange={(e) => set({ stopoverDays: Number(e.target.value) })} /></label>
-            <label className="chk"><input type="checkbox" checked={f.countHotel !== false} onChange={(e) => set({ countHotel: e.target.checked })} /> doliczaj nocleg na postojach</label>
-            <button type="button" className="link" onClick={() => setAsk(!ask)}>{ask ? "wróć do formularza" : "zapytaj zdaniem"}</button>
+            <label className="chk"><input type="checkbox" checked={f.countHotel !== false} onChange={(e) => set({ countHotel: e.target.checked })} /> {t("doliczaj nocleg na postojach")}</label>
+            <button type="button" className="link" onClick={() => setAsk(!ask)}>{ask ? t("wróć do formularza") : t("zapytaj zdaniem")}</button>
           </div>
         )}
       </form>

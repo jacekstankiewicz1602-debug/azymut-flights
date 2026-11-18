@@ -10,6 +10,7 @@ import type { Trip, TripLeg } from "@/lib/engine";
 import { AIRPORT_POS, fmtDur, fmtPln, fmtTime, gcKm } from "../geo";
 import { getState, liveArcs, markBest, setState, subscribe, touchArc } from "../store";
 import { carrierCode, cityOf, connBefore, days, logoUrl, svg, ticketOf } from "../trip-info";
+import { locale, t as tr, useLang } from "../i18n";
 import { ArcCanvas, arcGeom, type ArcGeom, type Colors, type LegDraw, type LiveDraw } from "./arcs";
 import { mapStyle, PALETTE, prefetchDem, registerDemProtocol, type Theme } from "./style";
 
@@ -129,7 +130,7 @@ const apBadge = (code: string, small = false) => `<span class="ap-badge${small ?
 function connBadges(trip: Trip, i: number): string {
   const c = connBefore(trip, i);
   if (!c || c.kind === "turn") return "";
-  const out = [`<span class="conn-badge${c.kind === "stay" ? " stay" : ""}">${svg(c.kind === "stay" ? "bed" : "clock")}${esc(c.kind === "stay" ? c.title : `Przesiadka ${c.title.split(" · ")[1]}`)}</span>`];
+  const out = [`<span class="conn-badge${c.kind === "stay" ? " stay" : ""}">${svg(c.kind === "stay" ? "bed" : "clock")}${esc(c.kind === "stay" ? c.title : tr("Przesiadka {dur}", { dur: c.title.split(" · ")[1] }))}</span>`];
   for (const ch of c.chips) if (ch.icon === "ticket" || ch.icon === "bus" || ch.icon === "shield") out.push(`<span class="conn-badge${ch.tone === "warn" ? " warn" : ch.tone === "ok" ? " ok" : ""}">${svg(ch.icon)}${esc(ch.label)}</span>`);
   return out.join("");
 }
@@ -244,7 +245,7 @@ class EarthController {
       if (!pins) this.pinsFramed = false;
       this.lastPins = pins;
       this.set("pins", { type: "FeatureCollection", features: (pins ?? []).filter((p) => AIRPORT_POS[p.code]).map((p) =>
-        point([AIRPORT_POS[p.code].lon, AIRPORT_POS[p.code].lat], { ...p, color: this.theme === "dark" ? lighten(p.color, 0.45) : p.color, label: `${p.name ? `${p.name} · ` : ""}${Math.round(p.price).toLocaleString("pl-PL")} zł` })) });
+        point([AIRPORT_POS[p.code].lon, AIRPORT_POS[p.code].lat], { ...p, color: this.theme === "dark" ? lighten(p.color, 0.45) : p.color, label: `${p.name ? `${p.name} · ` : ""}${Math.round(p.price).toLocaleString(locale())} zł` })) });
       if (fresh && s.pins) this.map.easeTo({ center: [10, 22], zoom: wide ? 1.45 : 0.75, padding: pad, duration: 1200 });
       else if (fresh && pins) this.frameAirports([...(s.params?.origin.slice(0, 1) ?? []), ...pins.map((p) => p.code)]);
     }
@@ -582,11 +583,11 @@ class EarthController {
       const leg = flights[done - 1].leg;
       const a = AIRPORT_POS[leg.to];
       for (const mk of this.markers) mk.getElement().firstElementChild?.classList.add("compact");
-      const what = isGround(leg) ? (leg.source === "flixbus" ? "FlixBus" : "transfer lokalny") : `${leg.carrier} ${leg.flightNo}`.trim();
+      const what = isGround(leg) ? (leg.source === "flixbus" ? "FlixBus" : tr("transfer lokalny")) : `${leg.carrier} ${leg.flightNo}`.trim();
       const cc = carrierCode(leg);
       const icon = cc ? `<img src="${logoUrl(cc)}" alt="" onerror="this.remove()">` : svg(isGround(leg) ? "bus" : "plane");
       this.markers.push(this.card(`<div class="full"><div class="leg-city"><span class="iata">${leg.to}</span>${esc(a.city)}</div><div class="leg-meta">${icon}${esc(what)}</div>
-        <div class="leg-row"><span>${fmtTime(leg.depLocal)} → ${fmtTime(leg.arrLocal)}${leg.arrEstimated ? "*" : ""}</span><span class="leg-price">${leg.price ? fmtPln(leg.price) : "w cenie biletu"}</span></div></div>
+        <div class="leg-row"><span>${fmtTime(leg.depLocal)} → ${fmtTime(leg.arrLocal)}${leg.arrEstimated ? "*" : ""}</span><span class="leg-price">${leg.price ? fmtPln(leg.price) : tr("w cenie biletu")}</span></div></div>
         <div class="mini">${apBadge(leg.to, true)}</div>`,
         "leg-card", [a.lon, a.lat]));
       j.done = done;
@@ -597,23 +598,21 @@ class EarthController {
     if (pause && !this.pauseMarker) {
       const a = AIRPORT_POS[pause.leg.to];
       const gap = (pause.next.dep - pause.leg.arr) / 3_600_000;
-      const risk: string[] = [];
-      if (pause.next.dir !== pause.leg.dir) risk.push(`pobyt ${j.trip.stayDays ?? "?"} dni`);
-      else {
-        if (gap >= 20 && !isGround(pause.next) && !isGround(pause.leg)) risk.push(`${Math.round(gap / 24) || 1} dni w mieście`);
-        if (pause.next.source === "flixbus" || pause.leg.source === "flixbus") risk.push("autobus");
-        if (pause.next.source === "local") risk.push("zmiana lotniska");
+      // chips on the stop: [tone, text in the interface language]
+      const risk: [string, string][] = [];
+      if (pause.next.dir === pause.leg.dir) {
+        if (pause.next.source === "flixbus" || pause.leg.source === "flixbus") risk.push(["", tr("autobus")]);
+        if (pause.next.source === "local") risk.push(["", tr("zmiana lotniska")]);
         const tn = ticketOf(pause.next), tl = ticketOf(pause.leg);
-        if (tn !== undefined && tl !== undefined ? tn !== tl : pause.next.price > 0 && pause.leg.price > 0) risk.push("osobne bilety");
-        else if (!isGround(pause.next) && !isGround(pause.leg)) risk.push("jeden bilet");
-        if (pause.next.hotel) risk.push(`nocleg ~${fmtPln(pause.next.hotel)}`);
-        if (gap < 4 && !isGround(pause.next)) risk.push("krótka przesiadka");
+        if (tn !== undefined && tl !== undefined ? tn !== tl : pause.next.price > 0 && pause.leg.price > 0) risk.push(["warn", tr("osobny bilet")]);
+        else if (!isGround(pause.next) && !isGround(pause.leg)) risk.push(["ok", tr("jeden bilet")]);
+        if (pause.next.hotel) risk.push(["info", tr("nocleg ~{price}", { price: fmtPln(pause.next.hotel) })]);
+        if (gap < 4 && !isGround(pause.next)) risk.push(["warn", tr("krótka przesiadka")]);
       }
       const turn = pause.next.dir !== pause.leg.dir, stay = !turn && gap >= 20 && !isGround(pause.next) && !isGround(pause.leg);
-      const title = turn ? `${esc(a.city)} · pobyt ${j.trip.stayDays ?? "?"} dni` : stay ? `${days(Math.round(gap / 24) || 1)} w mieście ${esc(a.city)}` : `${esc(a.city)} · ${fmtDur(gap)}`;
-      const next = pause.next.price > 0 ? `<span class="pc-sub">następny odcinek ${fmtPln(pause.next.price)}</span>` : "";
-      const tone = (r: string) => (/osobne|krótka/.test(r) ? "warn" : /jeden bilet/.test(r) ? "ok" : /nocleg|dni/.test(r) ? "info" : "");
-      this.pauseMarker = this.card(`<span class="pc-title">${svg(turn ? "pin" : stay ? "bed" : "clock")}${title}</span>${next}<span class="pc-chips">${risk.filter((r) => !/dni w mieście|pobyt/.test(r)).map((r) => `<span class="chip risk ${tone(r)}">${r === "osobne bilety" ? "osobny bilet" : r}</span>`).join("")}</span>`, "pause-chip", [a.lon, a.lat], true);
+      const title = turn ? tr("{city} · pobyt {n} dni", { city: esc(a.city), n: j.trip.stayDays ?? "?" }) : stay ? tr("{days} w mieście {city}", { days: days(Math.round(gap / 24) || 1), city: esc(a.city) }) : `${esc(a.city)} · ${fmtDur(gap)}`;
+      const next = pause.next.price > 0 ? `<span class="pc-sub">${tr("następny odcinek {price}", { price: fmtPln(pause.next.price) })}</span>` : "";
+      this.pauseMarker = this.card(`<span class="pc-title">${svg(turn ? "pin" : stay ? "bed" : "clock")}${title}</span>${next}<span class="pc-chips">${risk.map(([tone, r]) => `<span class="chip risk ${tone}">${esc(r)}</span>`).join("")}</span>`, "pause-chip", [a.lon, a.lat], true);
     } else if (!pause && this.pauseMarker) { this.pauseMarker.remove(); this.pauseMarker = null; }
 
     const finalSeg = j.segs[j.segs.length - 1];
@@ -656,6 +655,7 @@ export default function Earth() {
   const [theme, setTheme] = useState<Theme>("light");
   const [noGl, setNoGl] = useState(false);
   const [veil, setVeil] = useState<number | null>(null);
+  useLang(); // re-render the veil text when the language switches
   useEffect(() => {
     const th = readTheme();
     setTheme(th);
@@ -701,11 +701,11 @@ export default function Earth() {
       <div ref={host} className="earth" />
       {veil !== null && (
         <div className="route-veil" role="status">
-          <span>Wczytuję trasę</span>
+          <span>{tr("Wczytuję trasę")}</span>
           <span className="rv-bar"><i style={{ transform: `scaleX(${veil})` }} /></span>
         </div>
       )}
-      {noGl && <div className="no-gl caps">globus niedostępny w tej przeglądarce (brak WebGL)</div>}
+      {noGl && <div className="no-gl caps">{tr("globus niedostępny w tej przeglądarce (brak WebGL)")}</div>}
     </div>
   );
 }

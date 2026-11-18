@@ -1,5 +1,6 @@
 import airports from "@/lib/data/airports.json";
 import extra from "@/lib/data/airports-extra-pos.json";
+import { getLang } from "./i18n";
 
 type Pos = { lat: number; lon: number; city: string; cc: string; tz: string; region: string };
 /** Every airport with scheduled service: the curated core plus the compact rest ([iata, lat, lon, city, cc, tz, region]). */
@@ -22,8 +23,10 @@ export function gcKm(a: string, b: string): number {
   return 12742 * Math.asin(Math.sqrt(h));
 }
 
-const regionNames = typeof Intl !== "undefined" && "DisplayNames" in Intl ? new Intl.DisplayNames(["pl"], { type: "region" }) : null;
+// country names in the interface language (one Intl formatter per language)
+const regionNames: Partial<Record<string, Intl.DisplayNames | null>> = {};
+const namesFor = (l: string) => (regionNames[l] ??= typeof Intl !== "undefined" && "DisplayNames" in Intl ? new Intl.DisplayNames([l], { type: "region" }) : null);
 /** Polish country name for an ISO code ("IN" -> "Indie"). */
-export const countryName = (cc: string) => { try { return regionNames?.of(cc.toUpperCase()) ?? cc; } catch { return cc; } };
+export const countryName = (cc: string) => { try { return namesFor(getLang())?.of(cc.toUpperCase()) ?? cc; } catch { return cc; } };
 /** Country code of an airport. */
 export const ccOf = (code: string) => AIRPORT_POS[code]?.cc ?? "";

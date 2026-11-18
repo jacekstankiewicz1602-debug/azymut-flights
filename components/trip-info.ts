@@ -2,6 +2,7 @@
 // connection sits between two legs, carrier codes for logos, and the small inline icons.
 import type { Trip } from "@/lib/engine";
 import { AIRPORT_POS, fmtPln } from "./geo";
+import { getLang, t as tr } from "./i18n";
 
 type Leg = Trip["legs"][number];
 
@@ -15,7 +16,7 @@ export function dur(h: number) {
 }
 
 /** Polish locative is irregular, so "w {city}" uses the nominative after "w mieście" only when unknown. */
-export const days = (n: number) => `${n} ${n === 1 ? "dzień" : "dni"}`;
+export const days = (n: number) => (getLang() === "en" ? `${n} ${n === 1 ? "day" : "days"}` : `${n} ${n === 1 ? "dzień" : "dni"}`);
 
 export const ticketOf = (l: Leg) => (l as Leg & { ticket?: number }).ticket;
 /** Booking number of each leg (1, 2, …), from the engine's ticket ids or, for older results, from prices. */
@@ -46,16 +47,16 @@ export function connBefore(t: Trip, i: number, hotelOff = false): Conn | null {
   if (!prev) return null;
   const code = prev.to, city = cityOf(code);
   const gapH = Math.max(0, (leg.dep - prev.arr) / 3_600_000);
-  if (prev.dir !== leg.dir) return { kind: "turn", city, code, gapH, title: `Pobyt ${days(t.stayDays ?? Math.round(gapH / 24))} · ${city}`, chips: [] };
+  if (prev.dir !== leg.dir) return { kind: "turn", city, code, gapH, title: tr("Pobyt {days} · {city}", { days: days(t.stayDays ?? Math.round(gapH / 24)), city }), chips: [] };
   const chips: Conn["chips"] = [];
   const air = !isGround(leg) && !isGround(prev);
   // booking groups from the engine (leg.ticket); older results: a leg priced 0 rides on the previous ticket
   const sameTicket = ticketOf(leg) !== undefined && ticketOf(prev) !== undefined ? ticketOf(leg) === ticketOf(prev) : leg.price === 0;
   const separate = air && !sameTicket;
-  if (air) chips.push(separate ? { label: "osobny bilet · ryzyko przesiadki", tone: "warn", icon: "ticket" } : { label: "jeden bilet · chroniona przesiadka", tone: "ok", icon: "shield" });
-  if (leg.source === "local" || (prev.to !== leg.from)) chips.push({ label: "zmiana lotniska", tone: "", icon: "bus" });
-  if (leg.hotel || leg.overnight) chips.push({ label: `nocleg ~${fmtPln(leg.hotel ?? 0)}${hotelOff ? " (poza ceną)" : ""}`, tone: "", icon: "bed" });
-  if (separate && gapH < 3) chips.push({ label: "krótka przy osobnych biletach", tone: "warn" });
+  if (air) chips.push(separate ? { label: tr("osobny bilet · ryzyko przesiadki"), tone: "warn", icon: "ticket" } : { label: tr("jeden bilet · chroniona przesiadka"), tone: "ok", icon: "shield" });
+  if (leg.source === "local" || (prev.to !== leg.from)) chips.push({ label: tr("zmiana lotniska"), tone: "", icon: "bus" });
+  if (leg.hotel || leg.overnight) chips.push({ label: `${tr("nocleg ~{price}", { price: fmtPln(leg.hotel ?? 0) })}${hotelOff ? tr(" (poza ceną)") : ""}`, tone: "", icon: "bed" });
+  if (separate && gapH < 3) chips.push({ label: tr("krótka przy osobnych biletach"), tone: "warn" });
   const stay = gapH >= 20 && !isGround(leg) && !isGround(prev);
   if (stay) {
     const d = Math.round(gapH / 24) || 1;
@@ -119,8 +120,18 @@ export function bookings(t: Trip): number {
 /** Price with one checked bag per person (engine's trip.bagPrice), and whether a fee in it is estimated. */
 export const bagOf = (t: Trip) => t as Trip & { bagPrice?: number; bagEstimated?: boolean };
 
-/** Polish plural: plural(5, "kraj", "kraje", "krajów") → "5 krajów". */
-export function plural(n: number, one: string, few: string, many: string): string {
+// English forms for the words plural() is called with across the app ([one, many]); unknown words stay Polish.
+const PLURAL_EN: Record<string, [string, string]> = {
+  kraj: ["country", "countries"], miasto: ["city", "cities"], trasa: ["route", "routes"], wariant: ["option", "options"],
+  lotnisko: ["airport", "airports"], dzień: ["day", "days"], noc: ["night", "nights"], przesiadka: ["connection", "connections"],
+  bilet: ["ticket", "tickets"], lot: ["flight", "flights"], osoba: ["person", "people"], wynik: ["result", "results"],
+  zapytanie: ["query", "queries"], kierunek: ["destination", "destinations"], godzina: ["hour", "hours"], tydzień: ["week", "weeks"],
+};
+
+/** Polish plural: plural(5, "kraj", "kraje", "krajów") → "5 krajów"; in English "5 countries" (own forms or the table above). */
+export function plural(n: number, one: string, few: string, many: string, enOne?: string, enMany?: string): string {
+  const en = enOne !== undefined ? [enOne, enMany ?? `${enOne}s`] : PLURAL_EN[one];
+  if (getLang() === "en" && en) return `${n} ${n === 1 ? en[0] : en[1]}`;
   const t = n % 10, h = n % 100;
   return `${n} ${n === 1 ? one : t >= 2 && t <= 4 && (h < 12 || h > 14) ? few : many}`;
 }

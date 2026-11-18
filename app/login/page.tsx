@@ -1,10 +1,13 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { setLang, storedLang, t, useLang } from "@/components/i18n";
 
 export default function Login() {
   const [pw, setPw] = useState("");
   const [err, setErr] = useState(false);
   const [busy, setBusy] = useState(false);
+  useLang(); // re-render when the language switches
+  useEffect(() => { setLang(storedLang(), false); }, []);
   return (
     <main className="login">
       <form
@@ -18,10 +21,10 @@ export default function Login() {
         }}
       >
         <div className="wordmark">Azymut</div>
-        <label className="caps" htmlFor="pw">Hasło</label>
+        <label className="caps" htmlFor="pw">{t("Hasło")}</label>
         <input id="pw" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus autoComplete="current-password" />
-        <button type="submit" disabled={busy}>{busy ? "…" : "Wejdź"}</button>
-        {err && <div className="login-err">nieprawidłowe hasło</div>}
+        <button type="submit" disabled={busy}>{busy ? "…" : t("Wejdź")}</button>
+        {err && <div className="login-err">{t("nieprawidłowe hasło")}</div>}
       </form>
     </main>
   );
