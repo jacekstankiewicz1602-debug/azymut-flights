@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
-import { publicKey, subscribe, unsubscribe } from "@/lib/push";
+import { notifySearch, publicKey, subscribe, unsubscribe } from "@/lib/push";
 
 export async function GET() {
   return NextResponse.json({ key: await publicKey() });
 }
 
 export async function POST(req: Request) {
-  const sub = await req.json().catch(() => null);
+  const { search, ...sub } = (await req.json().catch(() => ({}))) as { search?: string; endpoint?: string; keys?: unknown };
   if (!sub?.endpoint || !sub?.keys) return NextResponse.json({ error: "bad subscription" }, { status: 400 });
-  await subscribe(sub);
+  await subscribe(sub as never);
+  // "Powiadom mnie" tapped during a search: this device gets that search's notification
+  if (typeof search === "string" && search) await notifySearch(search, sub.endpoint);
   return NextResponse.json({ ok: true });
 }
 

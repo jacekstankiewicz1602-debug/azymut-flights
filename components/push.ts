@@ -27,19 +27,27 @@ export async function pushState(): Promise<PushState> {
   return sub && Notification.permission === "granted" ? "on" : "off";
 }
 
-async function send(sub: PushSubscription) {
-  await fetch("/api/push", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sub.toJSON()) });
+async function send(sub: PushSubscription, search?: string) {
+  await fetch("/api/push", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...sub.toJSON(), search }) });
 }
 
-/** Asks for permission (call from a tap: iOS requires a user gesture) and subscribes this device. */
-export async function enablePush(): Promise<PushState> {
+/** This device's push endpoint when notifications are on: a search started here notifies only it. */
+export async function pushEndpoint(): Promise<string | null> {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return null;
+  const r = await registerSW();
+  return (await r?.pushManager.getSubscription().catch(() => null))?.endpoint ?? null;
+}
+
+/** Asks for permission (call from a tap: iOS requires a user gesture) and subscribes this device,
+ * for the search it is following when there is one. */
+export async function enablePush(search?: string): Promise<PushState> {
   const r = await registerSW();
   if (!r) return "unsupported";
   if ((await Notification.requestPermission()) !== "granted") return Notification.permission === "denied" ? "denied" : "off";
   const { key } = (await fetch("/api/push").then((x) => x.json())) as { key: string | null };
   if (!key) return "off";
   const sub = (await r.pushManager.getSubscription()) ?? (await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) }));
-  await send(sub);
+  await send(sub, search);
   return "on";
 }
 

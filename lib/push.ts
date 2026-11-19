@@ -36,12 +36,19 @@ export async function unsubscribe(endpoint: string) {
   if (sql) await sql`delete from push_subs where endpoint = ${endpoint}`;
 }
 
-/** Sends to every subscribed device; drops subscriptions the push service no longer knows. */
-export async function pushAll(msg: { title: string; body: string; url: string; tag?: string }) {
+/** Adds a device to a search's notification list. */
+export async function notifySearch(id: string, endpoint: string) {
+  const sql = await sqlClient();
+  if (sql) await sql`update live_searches set notify = array_append(notify, ${endpoint}) where id = ${id} and not (${endpoint} = any(notify))`;
+}
+
+/** Sends to the devices that started the search (not every subscribed phone: friends share the app);
+ * drops subscriptions the push service no longer knows. */
+export async function pushSearch(id: string, msg: { title: string; body: string; url: string; tag?: string }) {
   const sql = await sqlClient();
   const k = await keys();
   if (!sql || !k) return;
-  const rows = await sql`select endpoint, sub from push_subs`;
+  const rows = await sql`select endpoint, sub from push_subs where endpoint = any(select unnest(notify) from live_searches where id = ${id})`;
   await Promise.all(rows.map(async (r) => {
     try {
       await webpush.sendNotification(r.sub as PushSubscription, JSON.stringify(msg), { vapidDetails: { subject: SUBJECT, ...k }, TTL: 24 * 3600, urgency: "high" });

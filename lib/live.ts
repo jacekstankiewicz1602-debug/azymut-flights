@@ -15,7 +15,7 @@ import type { SearchParams } from "./types";
 import { exportCache, preloadCache, queryLog, touched } from "./sources/http";
 import { bookingFor } from "./booking";
 import { precomputedFor } from "./precompute";
-import { pushAll } from "./push";
+import { pushSearch } from "./push";
 
 export type LiveStatus = "running" | "done" | "limit" | "stopped" | "error";
 
@@ -34,14 +34,14 @@ export async function workerOnline(): Promise<{ id: string; seenAt: number; info
 }
 
 /** Queue a search. With the worker online every search runs there; deep searches always wait for it. */
-export async function startLive(params: SearchParams): Promise<{ id: string; runner: "vercel" | "worker" }> {
+export async function startLive(params: SearchParams, notify?: string | null): Promise<{ id: string; runner: "vercel" | "worker" }> {
   const sql = await sqlClient();
   if (!sql) throw new Error("live searches need DATABASE_URL");
   const id = randomUUID().slice(0, 12);
   const online = await workerOnline();
   const runner = online || params.depth === "deep" ? "worker" : "vercel";
   const message = runner === "vercel" ? "start" : online ? "w kolejce na workerze" : "czekam na worker na laptopie (npm run worker)";
-  await sql`insert into live_searches (id, params, status, message, runner) values (${id}, ${sql.json(params as never)}, 'running', ${message}, ${runner})`;
+  await sql`insert into live_searches (id, params, status, message, runner, notify) values (${id}, ${sql.json(params as never)}, 'running', ${message}, ${runner}, ${notify ? [notify] : []})`;
   if (runner === "worker") (await import("./bell")).ring(); // next/cache only in request handlers, not in the worker
   return { id, runner };
 }
@@ -347,7 +347,7 @@ export async function runStep(id: string, o: StepOptions = {}): Promise<boolean>
       const pr = row.params;
       await sql`update live_searches set params = params || ${sql.json({ extended: EXTEND_MIN } as never)},
         message = ${`szybkie ${maxMinutes} min nie wystarczyło – szukam dalej w tle (do ${EXTEND_MIN} min)`} where id = ${id}`;
-      await pushAll({ title: `${Math.round(keep[0]!.price * (pr.pax ?? 1)).toLocaleString("pl-PL")} zł · ${pr.originLabel} → ${pr.destLabel}`,
+      await pushSearch(id, { title: `${Math.round(keep[0]!.price * (pr.pax ?? 1)).toLocaleString("pl-PL")} zł · ${pr.originLabel} → ${pr.destLabel}`,
         body: `Wstępny wynik po ${maxMinutes} min${gap ? ` – może być do ${Math.round(gap * (pr.pax ?? 1)).toLocaleString("pl-PL")} zł taniej` : ""}. Szukam dalej w tle (do godziny), dam znać.`,
         url: `/#s=${id}`, tag: id }).catch(() => {});
     }
@@ -355,7 +355,7 @@ export async function runStep(id: string, o: StepOptions = {}): Promise<boolean>
     if (status === "done" || status === "limit") {
       const pr = row.params, best = keep[0]?.price;
       const route = anywhere ? `${pr.originLabel}: gdziekolwiek tanio` : `${pr.originLabel} → ${pr.destLabel}`;
-      await pushAll({ title: best ? `${Math.round(best * (pr.pax ?? 1)).toLocaleString("pl-PL")} zł · ${route}` : route,
+      await pushSearch(id, { title: best ? `${Math.round(best * (pr.pax ?? 1)).toLocaleString("pl-PL")} zł · ${route}` : route,
         body: best ? (status === "done" ? "Wyszukiwanie zakończone – sprawdzone wszystko." : "Wyszukiwanie zakończone na limicie czasu.") : "Wyszukiwanie zakończone, brak tras.",
         url: `/#s=${id}`, tag: id }).catch(() => {});
     }

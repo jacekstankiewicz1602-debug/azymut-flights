@@ -59,6 +59,8 @@ function pg(): postgres.Sql {
       await s`alter table live_searches add column if not exists claimed_by text`;
       // "Zatrzymaj i pokaż wynik": the runner finishes the current check and saves the best trips
       await s`alter table live_searches add column if not exists stop_requested boolean not null default false`;
+      // push endpoints of the devices that started this search (or asked for its notification): nobody else gets it
+      await s`alter table live_searches add column if not exists notify text[] not null default '{}'`;
       await s`create table if not exists workers (id text primary key, seen_at timestamptz not null, info jsonb)`;
       await s`create table if not exists live_events (search_id text not null, seq int not null, data jsonb not null, primary key (search_id, seq))`;
       await s`create table if not exists app_kv (key text primary key, value jsonb not null)`;

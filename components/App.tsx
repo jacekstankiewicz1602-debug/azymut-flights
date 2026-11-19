@@ -9,7 +9,7 @@ import { SearchFormPanel, toSearchForm, type FormState } from "./Form";
 import { AnywherePanel, openAnywhere } from "./Anywhere";
 import { feedLine, type FeedLine } from "./feed";
 import { getState, isPhone, liveArcs, markBest, PEEK_H, resetSearch, setState, sheetPx, sheetSnap, touchArc, useIsPhone, useStore, type Pin, type State, type Stats } from "./store";
-import { enablePush, pushState, refreshPush, type PushState } from "./push";
+import { enablePush, pushEndpoint, pushState, refreshPush, type PushState } from "./push";
 import { useSwipeClose } from "./swipe";
 import { locale, plural as plu, setLang, storedLang, t as tr, tx, useLang } from "./i18n";
 import { bagOf, bookings, plural, carrierCode, cityOf as tripCity, connBefore, dur, ICONS, isGround as groundLeg, isOneTicket, logoUrl, ticketNumbers } from "./trip-info";
@@ -83,7 +83,8 @@ async function runSearch(params: SearchParams) {
   // server stops only a running one), so an old search never holds the worker for nothing
   const prev = (() => { try { return localStorage.getItem(LAST_KEY); } catch { return null; } })();
   if (prev) await fetch("/api/search/stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: prev }) }).catch(() => null);
-  const res = await fetch("/api/search/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(params) });
+  const notify = await Promise.race([pushEndpoint().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 1500))]);
+  const res = await fetch("/api/search/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...params, notify }) });
   if (res.status === 401) { location.href = "/login"; return; }
   const { id, error } = await res.json();
   if (!id) { setState({ phase: "error", message: error ?? "Nie udało się uruchomić wyszukiwania" }); return; }
@@ -542,7 +543,7 @@ function NotifyMe() {
   if (st === "install") return <p className="pg-notify">{tr("Chcesz powiadomienie na iPhonie? Dodaj Azymut do ekranu początkowego (Udostępnij → Do ekranu początkowego) i szukaj z tej ikony.")}</p>;
   if (st === "denied") return <p className="pg-notify">{tr("Powiadomienia są zablokowane w ustawieniach przeglądarki dla tej strony. Szukanie i tak trwa dalej po zamknięciu.")}</p>;
   return (
-    <button className="pg-notify btn-notify" disabled={st === "busy"} onClick={() => { setSt("busy"); void enablePush().then(setSt).catch(() => setSt("off")); }}>
+    <button className="pg-notify btn-notify" disabled={st === "busy"} onClick={() => { setSt("busy"); void enablePush(followed || undefined).then(setSt).catch(() => setSt("off")); }}>
       <Icon name="bell" className="ico" />{st === "busy" ? tr("Włączam…") : tr("Powiadom mnie, gdy skończy")}<span className="dim">· {tr("możesz zamknąć aplikację")}</span>
     </button>
   );
