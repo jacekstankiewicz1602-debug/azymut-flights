@@ -10,25 +10,38 @@ const plCountry = new Intl.DisplayNames(["pl"], { type: "region" });
 const countryPl = (cc: string) => COUNTRY_PL[cc]?.[0] ?? (() => { try { return plCountry.of(cc) ?? cc; } catch { return cc; } })();
 const PREP = /^(z|ze|do|na|w|we|od|przez)\s+/;
 
-type Entry = Suggestion & { keys: string[]; rank: number };
+// the English list: the same entries with English labels (the parser reads both languages)
+type En = { label: string; sub: string; value: string };
+type Entry = Suggestion & { keys: string[]; rank: number; en: En };
+const enCountry = new Intl.DisplayNames(["en"], { type: "region" });
+const countryEn = (cc: string) => { try { return enCountry.of(cc) ?? cc; } catch { return cc; } };
+const REGION_EN: Record<string, string> = {
+  EUR: "Europe", CAU: "Caucasus", MEA: "Middle East", NAF: "North Africa", AFR: "Africa", SAS: "South Asia", SEA: "Southeast Asia",
+  EAS: "East Asia", CAS: "Central Asia", OCE: "Oceania", NAM: "North America", CAR: "Caribbean and Central America", SAM: "South America",
+};
+const airportsEn = (n: number) => `${n} ${n === 1 ? "airport" : "airports"}`;
 let index: Entry[] | null = null;
 
 function build(): Entry[] {
   const out: Entry[] = [];
-  out.push({ kind: "any", label: "Gdziekolwiek", sub: "najtańsze kierunki na całym świecie", value: "gdziekolwiek", keys: ["gdziekolwiek", "dowolnie", "wszedzie", "anywhere", "caly swiat"], rank: 0 });
+  out.push({ kind: "any", label: "Gdziekolwiek", sub: "najtańsze kierunki na całym świecie", value: "gdziekolwiek", keys: ["gdziekolwiek", "dowolnie", "wszedzie", "anywhere", "caly swiat", "everywhere", "worldwide"], rank: 0,
+    en: { label: "Anywhere", sub: "the cheapest destinations worldwide", value: "Anywhere" } });
   const regionCount = (r: string) => AIRPORTS.filter((a) => a.region === r).length;
   for (const [r, name] of Object.entries(REGIONS)) {
     const aliases = REGION_ALIASES.find(([k]) => k === r)?.[1] ?? [];
-    out.push({ kind: "region", label: name, sub: `region · ${regionCount(r)} lotnisk`, value: name, keys: [fold(name), ...aliases.map(fold)], rank: 1 });
+    out.push({ kind: "region", label: name, sub: `region · ${regionCount(r)} lotnisk`, value: name, keys: [fold(name), ...aliases.map(fold), fold(REGION_EN[r])], rank: 1,
+      en: { label: REGION_EN[r], sub: `region · ${airportsEn(regionCount(r))}`, value: REGION_EN[r] } });
   }
-  out.push({ kind: "region", label: "Azja", sub: "region · cała Azja", value: "Azja", keys: ["azja", "azji", "azj"], rank: 1 });
-  out.push({ kind: "region", label: "Poza Europą", sub: "wszystkie kierunki pozaeuropejskie", value: "poza Europą", keys: ["poza europa", "poza europe"], rank: 1 });
+  out.push({ kind: "region", label: "Azja", sub: "region · cała Azja", value: "Azja", keys: ["azja", "azji", "azj", "asia"], rank: 1, en: { label: "Asia", sub: "region · all of Asia", value: "Asia" } });
+  out.push({ kind: "region", label: "Poza Europą", sub: "wszystkie kierunki pozaeuropejskie", value: "poza Europą", keys: ["poza europa", "poza europe", "outside europe"], rank: 1,
+    en: { label: "Outside Europe", sub: "every destination outside Europe", value: "Outside Europe" } });
   const ccs = new Set(AIRPORTS.map((a) => a.cc));
   for (const cc of ccs) {
     const [name, stems] = COUNTRY_PL[cc] ?? [countryPl(cc), []];
     const n = AIRPORTS.filter((a) => a.cc === cc).length;
     if (!n) continue;
-    out.push({ kind: "country", label: name, sub: `kraj · ${n} ${n === 1 ? "lotnisko" : n < 5 ? "lotniska" : "lotnisk"}`, value: name, keys: [fold(name), ...stems.map(fold)], rank: 2 });
+    out.push({ kind: "country", label: name, sub: `kraj · ${n} ${n === 1 ? "lotnisko" : n < 5 ? "lotniska" : "lotnisk"}`, value: name, keys: [fold(name), ...stems.map(fold), fold(countryEn(cc))], rank: 2,
+      en: { label: countryEn(cc), sub: `country · ${airportsEn(n)}`, value: countryEn(cc) } });
   }
   const cities = new Map<string, string[]>();
   for (const a of AIRPORTS) {
@@ -40,11 +53,14 @@ function build(): Entry[] {
     const c = a.city.split("-")[0];
     const codes = cities.get(c)!;
     if (codes.length > 1 && codes[0] === a.iata) {
-      out.push({ kind: "city", label: c, sub: `${countryPl(a.cc)} · wszystkie lotniska (${codes.join(", ")})`, value: c, keys: [fold(c), fold(a.cityEn)], rank: 3 });
+      const ce = a.cityEn.split("-")[0];
+      out.push({ kind: "city", label: c, sub: `${countryPl(a.cc)} · wszystkie lotniska (${codes.join(", ")})`, value: c, keys: [fold(c), fold(a.cityEn)], rank: 3,
+        en: { label: ce, sub: `${countryEn(a.cc)} · all airports (${codes.join(", ")})`, value: ce } });
     }
     // airports outside the core rank a little lower (small and medium ones lower still), so "Oslo" lists OSL first
     const rank = isCore(a.iata) ? 4 : a.size === "L" ? 4.5 : a.size === "M" ? 5 : 6;
-    out.push({ kind: "airport", label: `${a.city} ${a.iata}`, sub: `${a.name}, ${countryPl(a.cc)}`, value: a.iata, keys: [a.iata.toLowerCase(), fold(a.city), fold(a.cityEn), fold(a.name), ...(a.aliases ?? []).map(fold)], rank });
+    out.push({ kind: "airport", label: `${a.city} ${a.iata}`, sub: `${a.name}, ${countryPl(a.cc)}`, value: a.iata, keys: [a.iata.toLowerCase(), fold(a.city), fold(a.cityEn), fold(a.name), ...(a.aliases ?? []).map(fold)], rank,
+      en: { label: `${a.cityEn || a.city} ${a.iata}`, sub: `${a.name}, ${countryEn(a.cc)}`, value: a.iata } });
   }
   return out;
 }
@@ -65,9 +81,10 @@ function score(e: Entry, q: string): number {
   return best === Infinity ? best : best * 10 + e.rank;
 }
 
-export function suggest(raw: string, limit = 8): Suggestion[] {
+export function suggest(raw: string, limit = 8, lang: "pl" | "en" = "pl"): Suggestion[] {
   index ??= build();
-  const q = fold(raw).replace(PREP, "");
+  const strip = lang === "en" ? stripEn : stripPl;
+  const q = fold(raw).replace(PREP, "").replace(/^(from|to|in)\s+/, "");
   if (!q) return index.filter((e) => e.kind === "any" || (e.kind === "country" && e.value === "Polska") || e.kind === "region").slice(0, limit).map(strip);
   if (/^[a-z]{3}$/.test(q)) {
     const exact = index.find((e) => e.kind === "airport" && e.value.toLowerCase() === q);
@@ -83,4 +100,5 @@ function rankAll(q: string): Entry[] {
   return index!.map((e) => ({ e, s: score(e, q) })).filter((x) => x.s < Infinity).sort((a, b) => a.s - b.s || a.e.label.length - b.e.label.length).map((x) => x.e);
 }
 
-const strip = ({ kind, label, sub, value }: Entry): Suggestion => ({ kind, label, sub, value });
+const stripPl = ({ kind, label, sub, value }: Entry): Suggestion => ({ kind, label, sub, value });
+const stripEn = ({ kind, en }: Entry): Suggestion => ({ kind, ...en });

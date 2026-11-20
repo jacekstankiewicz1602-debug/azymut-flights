@@ -1,13 +1,13 @@
 // Shared trip facts for the timeline in the results panel and the badges on the globe: what kind of
 // connection sits between two legs, carrier codes for logos, and the small inline icons.
 import type { Trip } from "@/lib/engine";
-import { AIRPORT_POS, fmtPln } from "./geo";
+import { AIRPORT_POS, cityName, fmtPln } from "./geo";
 import { getLang, t as tr } from "./i18n";
 
 type Leg = Trip["legs"][number];
 
 export const isGround = (l: { source: string }) => l.source === "flixbus" || l.source === "local" || l.source === "ground";
-export const cityOf = (c: string) => AIRPORT_POS[c]?.city ?? c;
+export const cityOf = (c: string) => cityName(c);
 
 /** "3 h 20 min", "45 min" */
 export function dur(h: number) {

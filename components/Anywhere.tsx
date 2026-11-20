@@ -4,12 +4,13 @@
 // and plays the stored route on the globe.
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { SearchResult, Trip } from "@/lib/engine";
-import { AIRPORT_POS, ccOf, countryName, fmtDate, fmtPln } from "./geo";
+import { AIRPORT_POS, ccOf, cityName, countryName, fmtDate, fmtPln } from "./geo";
 import { defaultForm, MonthGrid, PriceChart, scale, useCalendar, type FormState } from "./Form";
 import { getState, setState, useStore, type Pin } from "./store";
 import { plural, svg } from "./trip-info";
 import { locale, t, tx, useLang } from "./i18n";
 import { useSwipeClose } from "./swipe";
+import { currencySign, toPln } from "./money";
 
 type Row = {
   dest: string; month: string; stay: string; price: number | null; lb: number | null; nodes: string[] | null;
@@ -35,7 +36,7 @@ const months6 = () => {
   return out;
 };
 const zoneIdx = (z: Zone) => Math.max(0, ZONES.findIndex(([k]) => k === z));
-const city = (c: string) => AIRPORT_POS[c]?.city ?? c;
+const city = (c: string) => cityName(c);
 const value = (r: Row) => r.price ?? r.lb ?? 0;
 
 export function openAnywhere() {
@@ -61,7 +62,7 @@ export function AnywherePanel({ onSearch }: { onSearch: (f: FormState) => void }
   const [data, setData] = useState<Data | null>(null);
   const [err, setErr] = useState("");
   const active = pins !== null;
-  const qs = new URLSearchParams({ pc: "0", month: f.month, stay: f.stay, region: f.region, max: f.max, conn: f.conn, far: f.scope === "far" ? "1" : "0", zones: f.scope === "zones" ? "1" : "0", access: f.access ? "1" : "0" });
+  const qs = new URLSearchParams({ pc: "0", month: f.month, stay: f.stay, region: f.region, max: f.max ? String(Math.round(toPln(Number(f.max)))) : "", conn: f.conn, far: f.scope === "far" ? "1" : "0", zones: f.scope === "zones" ? "1" : "0", access: f.access ? "1" : "0" });
   useEffect(() => {
     if (!active) return;
     let dead = false;
@@ -124,7 +125,7 @@ export function AnywherePanel({ onSearch }: { onSearch: (f: FormState) => void }
             <select value={f.conn} onChange={(e) => setF({ ...f, conn: e.target.value })} aria-label={t("Przesiadki")}>
               <option value="">{t("dowolne przesiadki")}</option><option value="0">{t("bez przesiadek")}</option><option value="1">{t("max 1 przesiadka")}</option><option value="2">{t("max {n} przesiadki", { n: 2 })}</option><option value="3">{t("max {n} przesiadki", { n: 3 })}</option>
             </select>
-            <label className="any-max"><span>max</span><input inputMode="numeric" value={f.max} placeholder="zł" onChange={(e) => setF({ ...f, max: e.target.value.replace(/\D/g, "") })} aria-label={t("Cena maksymalna")} /></label>
+            <label className="any-max"><span>max</span><input inputMode="numeric" value={f.max} placeholder={currencySign()} onChange={(e) => setF({ ...f, max: e.target.value.replace(/\D/g, "") })} aria-label={t("Cena maksymalna")} /></label>
             <select value={f.scope} onChange={(e) => setF({ ...f, scope: e.target.value as typeof f.scope })} aria-label={t("Zasięg")}>
               <option value="zones">{t("cały świat, tanio dla regionu")}</option><option value="far">{t("tylko dalekie (poza Europą, 3500+ km)")}</option><option value="all">{t("cały świat, bez progów cen")}</option>
             </select>

@@ -4,14 +4,15 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { createPortal } from "react-dom";
 import type { SearchResult, Trip } from "@/lib/engine";
 import type { SearchParams } from "@/lib/types";
-import { AIRPORT_POS, ccOf, countryName, fmtDate, fmtPln, fmtTime } from "./geo";
+import { AIRPORT_POS, ccOf, cityName, countryName, fmtDate, fmtPln, fmtTime } from "./geo";
 import { SearchFormPanel, toSearchForm, type FormState } from "./Form";
 import { AnywherePanel, openAnywhere } from "./Anywhere";
 import { feedLine, type FeedLine } from "./feed";
 import { getState, isPhone, liveArcs, markBest, PEEK_H, resetSearch, setState, sheetPx, sheetSnap, touchArc, useIsPhone, useStore, type Pin, type State, type Stats } from "./store";
 import { enablePush, pushEndpoint, pushState, refreshPush, type PushState } from "./push";
 import { useSwipeClose } from "./swipe";
-import { locale, plural as plu, setLang, storedLang, t as tr, tx, useLang } from "./i18n";
+import { getLang, locale, onTextChange, plural as plu, setLang, storedLang, t as tr, tx, useLang } from "./i18n";
+import { currencies, currencyName, setCurrency, wantedCurrency } from "./money";
 import { bagOf, bookings, plural, carrierCode, cityOf as tripCity, connBefore, dur, ICONS, isGround as groundLeg, isOneTicket, logoUrl, ticketNumbers } from "./trip-info";
 
 const Scene = dynamic(() => import("./earth/Earth"), { ssr: false });
@@ -175,7 +176,7 @@ function notifyDrop(prelim: number, price: number, params: SearchParams) {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     const pax = params.pax ?? 1;
     const n = new Notification(tr("Azymut: taniej o {amount}", { amount: fmtPln((prelim - price) * pax) }), {
-      body: tr("{route}: {price} zamiast wstępnych {prelim}. Szukam dalej.", { route: `${params.originLabel} → ${params.destLabel}`, price: fmtPln(price * pax), prelim: fmtPln(prelim * pax) }),
+      body: tr("{route}: {price} zamiast wstępnych {prelim}. Szukam dalej.", { route: tx(`${params.originLabel} → ${params.destLabel}`), price: fmtPln(price * pax), prelim: fmtPln(prelim * pax) }),
       icon: "/icon.svg", tag: "azymut-drop",
     });
     n.onclick = () => { window.focus(); n.close(); };
@@ -252,6 +253,7 @@ function Brand() {
       </div>
       <ThemeSwitch />
       <LangSwitch />
+      <CurrencySelect />
     </header>
   );
 }
@@ -277,6 +279,26 @@ function LangSwitch() {
       <button className={lang === "pl" ? "on" : ""} aria-pressed={lang === "pl"} lang="pl" title="Polski" onClick={() => setLang("pl")}>PL</button>
       <button className={lang === "en" ? "on" : ""} aria-pressed={lang === "en"} lang="en" title="English" onClick={() => setLang("en")}>EN</button>
     </div>
+  );
+}
+
+/** The price currency: any with a rate; the default follows the language (PLN / EUR). */
+function CurrencySelect() {
+  useLang();
+  const [list, setList] = useState<string[]>(() => currencies());
+  useEffect(() => onTextChange(() => setList(currencies())), []);
+  // the server renders before the stored choice is known: the choice shows from the first effect on
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
+  const cur = ready ? wantedCurrency() : "PLN";
+  return (
+    // the code shows; the native list (a wheel on an iPhone) has the full names
+    <label className="cur-select" title={tr("Kursy: ExchangeRate-API, raz dziennie")}>
+      <span>{cur}</span><Icon name="chevron" className="ico" />
+      <select value={cur} onChange={(e) => setCurrency(e.target.value)} aria-label={tr("Waluta")}>
+        {(list.includes(cur) ? list : [cur, ...list]).map((c) => <option key={c} value={c}>{currencyName(c)}</option>)}
+      </select>
+    </label>
   );
 }
 
@@ -338,7 +360,7 @@ function searchSummary(p: SearchParams | null): string {
   if (!p) return tr("Dokąd lecisz?");
   const d = (iso?: string) => (iso ? fmtDate(iso) : "");
   const dates = p.dateFrom ? `${d(p.dateFrom)}${p.dateTo && p.dateTo !== p.dateFrom ? `–${d(p.dateTo)}` : ""}` : "";
-  return [`${p.originLabel} → ${p.destLabel}`, dates, tr("{n} os.", { n: p.pax ?? 1 })].filter(Boolean).join(" · ");
+  return [tx(`${p.originLabel} → ${p.destLabel}`), dates, tr("{n} os.", { n: p.pax ?? 1 })].filter(Boolean).join(" · ");
 }
 
 function PhoneMenu() {
@@ -353,6 +375,7 @@ function PhoneMenu() {
           <button className="ph-round flat" onClick={() => setOpen(false)} aria-label={tr("Zamknij")}><Icon name="close" className="" /></button></div>
         <div className="ph-menu-row"><span>{tr("Motyw")}</span><ThemeSwitch /></div>
         <div className="ph-menu-row"><span>{tr("Język")}</span><LangSwitch /></div>
+        <div className="ph-menu-row"><span>{tr("Waluta")}</span><CurrencySelect /></div>
       </div>
     </div>, document.body)}
   </>;
@@ -387,7 +410,7 @@ function PhoneTabs() {
   </>;
 }
 
-function Counter({ value, decimals = 0 }: { value: number; decimals?: number }) {
+function Counter({ value, decimals = 0, fmt }: { value: number; decimals?: number; fmt?: (n: number) => string }) {
   const [shown, setShown] = useState(value);
   const ref = useRef(value);
   useEffect(() => {
@@ -401,6 +424,7 @@ function Counter({ value, decimals = 0 }: { value: number; decimals?: number }) 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [value, decimals]);
+  if (fmt) return <>{fmt(shown)}</>;
   return <>{shown.toLocaleString(locale(), { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).replace(/,(?=\d{3})/g, " ")}</>;
 }
 
@@ -516,7 +540,7 @@ function Progress() {
       {running && srcs.length > 0 && <div className="pg-src">{srcs.map(([k, v]) => <span key={k} className={`src-chip s-${k}`}><i />{SRC_NAME[k] ?? k} <b className="mono">{v}</b></span>)}</div>}
       <div className="pg-prices">
         <div><span className="pg-k">{running ? (cheaper || prelim === null ? tr("Najlepsza do tej pory") : tr("Wstępnie")) : tr("Najtańsza trasa")}</span>
-          <span className={`pg-v mono big ${cheaper ? "down" : ""}`}>{best !== null ? <><Counter key="b" value={best * pax} /> zł</> : "—"}</span>
+          <span className={`pg-v mono big ${cheaper ? "down" : ""}`}>{best !== null ? <Counter key="b" value={best * pax} fmt={fmtPln} /> : "—"}</span>
           {cheaper && <DropChip prelim={prelim! * pax} best={best! * pax} />}</div>
         <div><span className="pg-k">Google</span><span className="pg-v mono">{google ? fmtPln(google * pax) : running ? (bs && !bs.ok ? tr("brak ceny") : tr("sprawdzam…")) : "—"}</span>
           {google && gb?.access ? <span className="pg-sub mono">{tr("z dojazdem {price}", { price: fmtPln(gb.access * pax) })}</span> : null}</div>
@@ -633,7 +657,7 @@ function access(t: Trip, dir: "out" | "ret") {
   const bus = (dir === "out" ? legs.slice(0, k) : legs.slice(k + 1)).filter(isGround);
   const airport = dir === "out" ? legs[k].from : legs[k].to;
   const hours = bus.length ? (bus[bus.length - 1].arr - bus[0].dep) / 3_600_000 : 0;
-  return { airport, city: AIRPORT_POS[airport]?.city ?? airport, cc: AIRPORT_POS[airport]?.cc ?? "", cost: bus.reduce((s, l) => s + l.price, 0), hours, bus: bus.length > 0 };
+  return { airport, city: cityName(airport), cc: AIRPORT_POS[airport]?.cc ?? "", cost: bus.reduce((s, l) => s + l.price, 0), hours, bus: bus.length > 0 };
 }
 
 /** "Wylot z Berlina · dojazd 3 h 10 min, 74 zł" */
@@ -835,7 +859,7 @@ function useDestinations(r: SearchResult | null, params: SearchParams | null): D
       else { row.n++; if (t.price < row.best!.price) row.best = t; }
     }
     for (const d of dests ?? []) {
-      const city = d.city || tripCity(d.code);
+      const city = (getLang() === "en" ? "" : d.city) || tripCity(d.code);
       if (!by.has(city)) by.set(city, { city, code: d.code, best: null, n: 0, checked: d.checked });
     }
     return [...by.values()].sort((a, b) => (a.best ? a.best.price : Infinity) - (b.best ? b.best.price : Infinity) || a.city.localeCompare(b.city, "pl"));
@@ -1371,7 +1395,7 @@ function Results() {
     <section className={`results glass ${open ? "open" : "closed"}`} aria-label={tr("Wyniki")} hidden={journey !== "none" && !inline}>
       <button className="r-handle" onClick={() => setState((s) => ({ panelOpen: !s.panelOpen }))} aria-expanded={open}>
         <span className="r-grip" />
-        <span className="r-title">{params ? `${params.originLabel} → ${params.destLabel}` : tr("Wyniki")}</span>
+        <span className="r-title">{params ? tx(`${params.originLabel} → ${params.destLabel}`) : tr("Wyniki")}</span>
         <span className="mono">{n ? `${multi ? (countries ? `${plural(byCountry(rows).filter((g) => g.rows[0].best).length, "kraj", "kraje", "krajów")}, ` : "") + plural(rows.filter((d) => d.best).length, "miasto", "miasta", "miast") : plural(n, "trasa", "trasy", "tras")} · ${tr("od {price}", { price: fmtPln(r!.trips[0].price * pax) })}` : ""}</span>
         <span className="r-chev"><Icon name="chevron" className="" /></span>
       </button>
@@ -1399,14 +1423,14 @@ function JourneyOverlay() {
       {phase === "flying" && (
         <div className="j-counter">
           <span className="caps">{tr("Suma")}</span>
-          <span className="mono"><Counter value={total} /> zł</span>
+          <span className="mono"><Counter value={total} fmt={fmtPln} /></span>
         </div>
       )}
       {phase === "final" && (
         <div className="j-final">
           <div className="j-card">
             <div className="j-route">{routeCodes(t).map((c) => <div key={c}>{c}</div>)}</div>
-            <div className="j-price mono"><Counter value={t.price} /> <span>zł</span></div>
+            <div className="j-price mono"><Counter value={t.price} fmt={fmtPln} /></div>
             <div className={`j-save mono ${save !== null && save < 0 ? "neg" : ""}`}>{save !== null ? tr("{amount} vs Google", { amount: `${save >= 0 ? "−" : "+"}${fmtPln(Math.abs(save))}` }) : tr("brak ceny bazowej Google")}</div>
             {t.estimated && <div className="j-warn">{tr("część odcinków ma cenę szacunkową")}</div>}
             <div className="j-actions">
@@ -1518,7 +1542,7 @@ function RadarButton() {
   return <button className={`radar-btn ${open ? "on" : ""}`} onClick={() => setRadar(!open)}>{tr("Radar okazji")}</button>;
 }
 
-const cityOf = (c: string) => AIRPORT_POS[c]?.city ?? c;
+const cityOf = (c: string) => cityName(c);
 const REGION_PL: Record<string, string> = { SAM: "Ameryka Płd.", CAR: "Karaiby", NAM: "Ameryka Płn.", SEA: "Azja Płd.-Wsch.", SAS: "Azja Płd.", EAS: "Azja Wsch.", MEA: "Bliski Wschód", AFR: "Afryka", NAF: "Afryka Płn.", OCE: "Oceania", CAU: "Kaukaz", CAS: "Azja Środk." };
 
 function Radar() {
@@ -1572,7 +1596,7 @@ function Radar() {
         </ol>
         <div className="rd-section caps">{tr("obserwowane kierunki (mail przy okazji poniżej 50% normy)")}</div>
         <div className="rd-watch">
-          {data?.watch.map((w) => <span key={w.id} className="mono">{w.label}<button aria-label={tr("Usuń {label}", { label: w.label })} onClick={() => remove(w.id)}>×</button></span>)}
+          {data?.watch.map((w) => <span key={w.id} className="mono">{tx(w.label)}<button aria-label={tr("Usuń {label}", { label: tx(w.label) })} onClick={() => remove(w.id)}>×</button></span>)}
           <form onSubmit={(e) => { e.preventDefault(); void add(); }}>
             <input value={watch} onChange={(e) => setWatch(e.target.value)} placeholder={tr("np. Peru, Tajlandia, BKK")} aria-label={tr("Dodaj obserwowany kierunek")} />
           </form>

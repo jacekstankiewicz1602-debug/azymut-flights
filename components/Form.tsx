@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { SearchForm } from "@/lib/parse";
 import type { Suggestion } from "@/lib/suggest";
 import { fmtPln } from "./geo";
+import { conv } from "./money";
 import { setState, useStore } from "./store";
 import { getLang, locale, plural, t, tx, useLang } from "./i18n";
 
@@ -18,7 +19,8 @@ const addDays = (s: string, n: number) => iso(new Date(Date.parse(s) + n * 86400
 const addMonths = (ym: string, n: number) => { const d = new Date(Date.parse(ym + "-01")); d.setUTCMonth(d.getUTCMonth() + n); return iso(d).slice(0, 7); };
 const monthEnd = (ym: string) => addDays(addMonths(ym, 1) + "-01", -1);
 const fmtD = (s: string) => new Intl.DateTimeFormat(locale(), { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(Date.parse(s.slice(0, 10)))).replace(/\.$/, "");
-const short = (n: number) => (n >= 10000 ? `${Math.round(n / 1000)}k` : String(Math.round(n)));
+// calendar cells: the number alone, in the display currency
+const short = (pln: number) => { const n = conv(pln); return n >= 10000 ? `${Math.round(n / 1000)}k` : String(Math.round(n)); };
 
 export type FormState = SearchForm & { months: string[]; maxAccessH?: number };
 
@@ -54,7 +56,7 @@ function PlaceInput({ label, value, onChange, placeholder, autoFocus, extra }: {
     if (!open) return;
     const n = ++seq.current;
     const t = setTimeout(() => {
-      fetch(`/api/suggest?q=${encodeURIComponent(value)}`).then((r) => r.json()).then((list: Suggestion[]) => { if (n === seq.current) { setItems(list); setHi(0); } }).catch(() => {});
+      fetch(`/api/suggest?q=${encodeURIComponent(value)}&lang=${getLang()}`).then((r) => r.json()).then((list: Suggestion[]) => { if (n === seq.current) { setItems(list); setHi(0); } }).catch(() => {});
     }, 110);
     return () => clearTimeout(t);
   }, [value, open]);
@@ -145,7 +147,7 @@ export function MonthGrid({ ym, days, cls, sel, onPick, min }: { ym: string; day
           const p = days[d];
           const off = d < min;
           return (
-            <button key={d} type="button" disabled={off} className={`cal-day ${sel(d)} ${p ? cls(p) : ""}`} onClick={() => onPick(d)} aria-label={`${fmtD(d)}${p ? t(", od {price} zł", { price: p }) : ""}`}>
+            <button key={d} type="button" disabled={off} className={`cal-day ${sel(d)} ${p ? cls(p) : ""}`} onClick={() => onPick(d)} aria-label={`${fmtD(d)}${p ? t(", od {price}", { price: fmtPln(p) }) : ""}`}>
               <span className="cd-n">{i + 1}</span>
               <span className="cd-p mono">{p ? short(p) : off ? "" : "·"}</span>
             </button>
@@ -316,7 +318,7 @@ export function SearchFormPanel({ onSearch, onAsk, busy, hidden }: { onSearch: (
     const months: string[] = [];
     for (let m = params.dateFrom.slice(0, 7); m <= params.dateTo.slice(0, 7) && months.length < 12; m = addMonths(m, 1)) months.push(m);
     const whole = params.dateFrom.endsWith("-01") && params.dateTo === monthEnd(params.dateTo.slice(0, 7));
-    set({ from: params.originLabel, to: params.destLabel, type: params.tripType ?? (params.oneWay ? "ow" : "rt"), stayMin: params.stayMin, stayMax: params.stayMax,
+    set({ from: tx(params.originLabel), to: tx(params.destLabel), type: params.tripType ?? (params.oneWay ? "ow" : "rt"), stayMin: params.stayMin, stayMax: params.stayMax,
       depth: params.depth ?? "fast", researchMin: params.researchMin, baggage: params.baggage ?? "cabin", pax: params.pax ?? 1, abroad: params.abroad ?? false, strict: params.strict ?? false, maxAccessH: (params as { maxAccessH?: number }).maxAccessH ?? 4, ...(whole ? { dateMode: "month" as const, months, dateFrom: params.dateFrom, dateTo: params.dateTo } : { dateMode: "days" as const, dateFrom: params.dateFrom, dateTo: params.dateTo }) });
   }, [params?.query]); // eslint-disable-line react-hooks/exhaustive-deps
   const submit = () => { if (!f.to.trim() || busy) return; setDates(false); onSearch(f); };

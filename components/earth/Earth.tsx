@@ -7,7 +7,7 @@ import maplibregl, { type GeoJSONSource, type Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import type { Trip, TripLeg } from "@/lib/engine";
-import { AIRPORT_POS, fmtDur, fmtPln, fmtTime, gcKm } from "../geo";
+import { AIRPORT_POS, cityName, fmtDur, fmtPln, fmtTime, gcKm } from "../geo";
 import { getState, isPhone, liveArcs, markBest, setState, sheetPx, sheetSnap, subscribe, TAB_H, touchArc } from "../store";
 import { carrierCode, cityOf, connBefore, days, logoUrl, svg, ticketOf } from "../trip-info";
 import { locale, t as tr, useLang } from "../i18n";
@@ -277,7 +277,7 @@ class EarthController {
       if (!pins) this.pinsFramed = false;
       this.lastPins = pins;
       this.set("pins", { type: "FeatureCollection", features: (pins ?? []).filter((p) => AIRPORT_POS[p.code]).map((p) =>
-        point([AIRPORT_POS[p.code].lon, AIRPORT_POS[p.code].lat], { ...p, color: this.theme === "dark" ? lighten(p.color, 0.45) : p.color, label: `${p.name ? `${p.name} · ` : ""}${Math.round(p.price).toLocaleString(locale())} zł` })) });
+        point([AIRPORT_POS[p.code].lon, AIRPORT_POS[p.code].lat], { ...p, color: this.theme === "dark" ? lighten(p.color, 0.45) : p.color, label: `${p.name ? `${p.name} · ` : ""}${fmtPln(p.price)}` })) });
       if (fresh && s.pins) this.map.easeTo({ center: [10, 22], zoom: wide ? 1.45 : 0.75, padding: pad, duration: 1200 });
       else if (fresh && pins) this.frameAirports([...(s.params?.origin.slice(0, 1) ?? []), ...pins.map((p) => p.code)]);
     }
@@ -622,7 +622,7 @@ class EarthController {
       const what = isGround(leg) ? (leg.source === "flixbus" ? "FlixBus" : tr("transfer lokalny")) : `${leg.carrier} ${leg.flightNo}`.trim();
       const cc = carrierCode(leg);
       const icon = cc ? `<img src="${logoUrl(cc)}" alt="" onerror="this.remove()">` : svg(isGround(leg) ? "bus" : "plane");
-      this.markers.push(this.card(`<div class="full"><div class="leg-city"><span class="iata">${leg.to}</span>${esc(a.city)}</div><div class="leg-meta">${icon}${esc(what)}</div>
+      this.markers.push(this.card(`<div class="full"><div class="leg-city"><span class="iata">${leg.to}</span>${esc(cityName(leg.to))}</div><div class="leg-meta">${icon}${esc(what)}</div>
         <div class="leg-row"><span>${fmtTime(leg.depLocal)} → ${fmtTime(leg.arrLocal)}${leg.arrEstimated ? "*" : ""}</span><span class="leg-price">${leg.price ? fmtPln(leg.price) : tr("w cenie biletu")}</span></div></div>
         <div class="mini">${apBadge(leg.to, true)}</div>`,
         "leg-card", [a.lon, a.lat]));

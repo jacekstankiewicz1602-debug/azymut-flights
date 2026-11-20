@@ -72,7 +72,7 @@ export const EN_UI: Record<string, string> = {
   "pobyt": "stay",
   "Najkrótszy pobyt": "Shortest stay",
   "Najdłuższy pobyt": "Longest stay",
-  ", od {price} zł": ", from {price} zł",
+  ", od {price}": ", from {price}",
   "ceny według daty wylotu": "prices by departure date",
   "Wykres cen według daty wylotu": "Chart of prices by departure date",
   "Wczytuję siatkę dat…": "Loading the date grid…",

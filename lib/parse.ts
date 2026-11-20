@@ -26,6 +26,37 @@ const countriesByName = () => otherCountries ??= [...new Set(EXTRA_AIRPORTS.map(
 
 type Place = { codes: string[]; label: string; country?: string };
 
+// English names (the interface in English, its autocomplete): regions and countries. The label stays
+// Polish, as everywhere downstream; the client shows it in English.
+const EN_REGIONS: [string, string][] = [
+  ["southeast asia", "SEA"], ["south east asia", "SEA"], ["south-east asia", "SEA"], ["south america", "SAM"], ["latin america", "SAM"],
+  ["caribbean and central america", "CAR"], ["central america", "CAR"], ["caribbean", "CAR"], ["south asia", "SAS"],
+  ["east asia", "EAS"], ["far east", "EAS"], ["central asia", "CAS"], ["middle east", "MEA"], ["north africa", "NAF"],
+  ["africa", "AFR"], ["oceania", "OCE"], ["north america", "NAM"], ["caucasus", "CAU"], ["europe", "EUR"],
+];
+const EN_COUNTRY_ALIASES: Record<string, string> = { usa: "US", "u.s.": "US", us: "US", america: "US", "united states of america": "US", uk: "GB", britain: "GB", "great britain": "GB", england: "GB", uae: "AE", emirates: "AE", "czech republic": "CZ", holland: "NL", "south korea": "KR", korea: "KR", turkey: "TR" };
+const regionNamesEn = new Intl.DisplayNames(["en"], { type: "region" });
+let enCountries: Map<string, string> | null = null;
+const countryEn = (name: string) => (enCountries ??= new Map([...new Set([...AIRPORTS, ...EXTRA_AIRPORTS].map((a) => a.cc))]
+  .flatMap((cc): [string, string][] => { try { const n = regionNamesEn.of(cc); return n && n !== cc ? [[fold(n), cc]] : []; } catch { return []; } })
+  .concat(Object.entries(EN_COUNTRY_ALIASES)))).get(name);
+const countryPlName = (cc: string) => COUNTRY_PL[cc]?.[0] ?? (() => { try { return regionNamesPl.of(cc) ?? cc; } catch { return cc; } })();
+
+function resolveEnglish(t: string): Place | null {
+  const bare = t.replace(/^(from|to|in)\s+/, "").replace(/^the\s+/, "").trim();
+  if (/^(anywhere|everywhere|worldwide|the whole world|whole world|any destination)$/.test(bare)) return { codes: AIRPORTS.map((a) => a.iata), label: "gdziekolwiek" };
+  if (/^(outside|beyond|out of|non-)\s*europe(an)?$/.test(bare)) return { codes: AIRPORTS.filter((a) => a.region !== "EUR").map((a) => a.iata), label: "poza Europą" };
+  if (bare === "asia") return { codes: AIRPORTS.filter((a) => ["SAS", "SEA", "EAS", "CAS"].includes(a.region)).map((a) => a.iata), label: "Azja" };
+  const reg = EN_REGIONS.find(([n]) => bare === n)?.[1];
+  if (reg) return { codes: regionCodes((r) => r === reg || (reg === "AFR" && r === "NAF")), label: REGIONS[reg] };
+  const cc = countryEn(bare);
+  if (cc) {
+    const codes = countryCodes(cc);
+    if (codes.length) return { codes, label: countryPlName(cc), country: cc };
+  }
+  return null;
+}
+
 export function resolvePlace(text: string): Place | null {
   const raw = text.trim();
   if (!raw) return null;
@@ -41,6 +72,8 @@ export function resolvePlace(text: string): Place | null {
   if (/^[A-Z]{3}$/.test(raw) && AP[raw]) return { codes: [raw], label: AP[raw].city };
   const iatas = raw.match(/\b[A-Z]{3}\b/g)?.filter((c) => AP[c]);
   if (iatas?.length) return { codes: iatas, label: iatas.length === 1 ? AP[iatas[0]].city : iatas.join("/") };
+  const en = resolveEnglish(t);
+  if (en) return en;
   if (/^(gdziekolwiek|dokadkolwiek|dowolnie|dowolne miejsce|wszedzie|anywhere|caly swiat|swiat)$/.test(t)) {
     return { codes: AIRPORTS.map((a) => a.iata), label: "gdziekolwiek" };
   }

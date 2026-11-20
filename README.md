@@ -66,6 +66,7 @@ All free, through the sites' public endpoints:
 | Aviasales | price calendars, incl. flights to and from Russia |
 | Kayak | the "anywhere" price map |
 | FlixBus | bus transfers with real times and prices |
+| [ExchangeRate-API](https://www.exchangerate-api.com) | exchange rates for showing prices in another currency (open access, daily) |
 
 Optional (off by default, see `.env.example`): SerpAPI, Duffel, Claude (reading place names in
 sentences).

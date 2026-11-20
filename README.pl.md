@@ -64,6 +64,7 @@ Wszystkie bezpłatne, przez publiczne endpointy stron:
 | Aviasales | kalendarze cen, m.in. loty do i z Rosji |
 | Kayak | mapa cen „gdziekolwiek” |
 | FlixBus | dojazdy autobusem z prawdziwymi godzinami i cenami |
+| [ExchangeRate-API](https://www.exchangerate-api.com) | kursy walut do pokazywania cen w innej walucie (otwarty dostęp, raz dziennie) |
 
 Opcjonalnie (domyślnie wyłączone, patrz `.env.example`): SerpAPI, Duffel, Claude (rozpoznawanie
 nazw miejsc w zdaniach).

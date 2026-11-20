@@ -12,7 +12,17 @@ const EN: Record<string, string> = { ...EN_SERVER, ...EN_UI, ...EN_APP };
 
 // "pl" while the page hydrates (the server renders Polish); the stored or browser language right after
 let lang: Lang = "pl";
+let rev = 0; // bumps on a language or a currency change: every useLang() renders again
 const subs = new Set<() => void>();
+// the currency display (money.ts): "… zł" in a text becomes the chosen currency
+let filter: (s: string) => string = (s) => s;
+export function setTextFilter(f: (s: string) => string) { filter = f; }
+// English place names in server text (geo.ts: "Islandia" → "Iceland")
+let placeFilter: (s: string) => string = (s) => s;
+export function setPlaceFilter(f: (s: string) => string) { placeFilter = f; }
+/** Re-render the text (the currency or the exchange rates changed). */
+export function refreshText() { rev++; subs.forEach((f) => f()); }
+export function onTextChange(f: () => void) { subs.add(f); return () => { subs.delete(f); }; }
 
 export function storedLang(): Lang {
   try {
@@ -26,28 +36,31 @@ export function setLang(l: Lang, remember = true) {
   if (remember) try { localStorage.setItem(KEY, l); } catch { /* private mode */ }
   if (l === lang) return;
   lang = l;
+  rev++;
   document.documentElement.lang = l;
   subs.forEach((f) => f());
 }
 export function useLang(): Lang {
-  return useSyncExternalStore((f) => { subs.add(f); return () => { subs.delete(f); }; }, () => lang, () => "pl");
+  useSyncExternalStore((f) => { subs.add(f); return () => { subs.delete(f); }; }, () => rev, () => 0);
+  return lang;
 }
 
 const fill = (s: string, vars?: Record<string, string | number>) => (vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : s);
 
 /** UI text: written in Polish with {name} placeholders; the English version from the dictionaries. */
 export function t(pl: string, vars?: Record<string, string | number>): string {
-  return fill(lang === "en" ? EN[pl] ?? pl : pl, vars);
+  return filter(fill(lang === "en" ? EN[pl] ?? pl : pl, vars));
 }
 
 /** Text from the server (engine messages, notes, flags): exact matches first, then the patterns. */
 export function tx(text: string | null | undefined): string {
-  if (!text || lang === "pl") return text ?? "";
+  if (!text) return "";
+  if (lang === "pl") return filter(text);
   const hit = EN[text] ?? EN[text.replace(/[.…]+$/, "")];
-  if (hit) return hit;
+  if (hit) return filter(hit);
   let out = text;
   for (const [re, to] of SERVER_PATTERNS) out = out.replace(re, to as never);
-  return out;
+  return filter(placeFilter(out));
 }
 
 /** "1 lotnisko / 2 lotniska / 5 lotnisk" in Polish, "1 airport / 2 airports" in English. */

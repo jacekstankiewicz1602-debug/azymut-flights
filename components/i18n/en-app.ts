@@ -47,6 +47,8 @@ export const EN_APP: Record<string, string> = {
   "Ciemny": "Dark",
   "Jasny": "Light",
   "Język": "Language",
+  "Waluta": "Currency",
+  "Kursy: ExchangeRate-API, raz dziennie": "Rates: ExchangeRate-API, daily",
   "Ostatnie": "Recent",
   "Wczytuję…": "Loading…",
   "Brak wyszukiwań.": "No searches yet.",
