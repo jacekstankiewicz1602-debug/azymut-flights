@@ -347,17 +347,24 @@ export async function runStep(id: string, o: StepOptions = {}): Promise<boolean>
       const pr = row.params;
       await sql`update live_searches set params = params || ${sql.json({ extended: EXTEND_MIN } as never)},
         message = ${`szybkie ${maxMinutes} min nie wystarczyło – szukam dalej w tle (do ${EXTEND_MIN} min)`} where id = ${id}`;
-      await pushSearch(id, { title: `${Math.round(keep[0]!.price * (pr.pax ?? 1)).toLocaleString("pl-PL")} zł · ${pr.originLabel} → ${pr.destLabel}`,
-        body: `Wstępny wynik po ${maxMinutes} min${gap ? ` – może być do ${Math.round(gap * (pr.pax ?? 1)).toLocaleString("pl-PL")} zł taniej` : ""}. Szukam dalej w tle (do godziny), dam znać.`,
-        url: `/#s=${id}`, tag: id }).catch(() => {});
+      const pax = pr.pax ?? 1, price = keep[0]!.price;
+      await pushSearch(id, ({ en, money, place }) => ({ title: `${money(price * pax)} · ${place(`${pr.originLabel} → ${pr.destLabel}`)}`,
+        body: en
+          ? `Preliminary result after ${maxMinutes} min${gap ? ` – could be up to ${money(gap * pax)} cheaper` : ""}. Searching on in the background (up to an hour), I'll let you know.`
+          : `Wstępny wynik po ${maxMinutes} min${gap ? ` – może być do ${money(gap * pax)} taniej` : ""}. Szukam dalej w tle (do godziny), dam znać.`,
+        url: `/#s=${id}`, tag: id })).catch(() => {});
     }
     // the phone: one notification when the search ends on its own (not after "Zatrzymaj", the user is there)
     if (status === "done" || status === "limit") {
-      const pr = row.params, best = keep[0]?.price;
-      const route = anywhere ? `${pr.originLabel}: gdziekolwiek tanio` : `${pr.originLabel} → ${pr.destLabel}`;
-      await pushSearch(id, { title: best ? `${Math.round(best * (pr.pax ?? 1)).toLocaleString("pl-PL")} zł · ${route}` : route,
-        body: best ? (status === "done" ? "Wyszukiwanie zakończone – sprawdzone wszystko." : "Wyszukiwanie zakończone na limicie czasu.") : "Wyszukiwanie zakończone, brak tras.",
-        url: `/#s=${id}`, tag: id }).catch(() => {});
+      const pr = row.params, best = keep[0]?.price, pax = pr.pax ?? 1;
+      await pushSearch(id, ({ en, money, place }) => {
+        const route = anywhere ? `${place(pr.originLabel)}: ${en ? "anywhere cheap" : "gdziekolwiek tanio"}` : place(`${pr.originLabel} → ${pr.destLabel}`);
+        return { title: best ? `${money(best * pax)} · ${route}` : route,
+          body: en
+            ? (best ? (status === "done" ? "Search finished – everything checked." : "Search finished at the time limit.") : "Search finished, no routes found.")
+            : (best ? (status === "done" ? "Wyszukiwanie zakończone – sprawdzone wszystko." : "Wyszukiwanie zakończone na limicie czasu.") : "Wyszukiwanie zakończone, brak tras."),
+          url: `/#s=${id}`, tag: id };
+      }).catch(() => {});
     }
     return status === "running";
   } catch (e) {

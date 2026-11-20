@@ -6,9 +6,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { search, ...sub } = (await req.json().catch(() => ({}))) as { search?: string; endpoint?: string; keys?: unknown };
+  const { search, lang, cur, ...sub } = (await req.json().catch(() => ({}))) as { search?: string; lang?: string; cur?: string; endpoint?: string; keys?: unknown };
   if (!sub?.endpoint || !sub?.keys) return NextResponse.json({ error: "bad subscription" }, { status: 400 });
-  await subscribe(sub as never);
+  await subscribe(sub as never, lang === "en" ? "en" : "pl", typeof cur === "string" && /^[A-Z]{3}$/.test(cur) ? cur : "PLN");
   // "Powiadom mnie" tapped during a search: this device gets that search's notification
   if (typeof search === "string" && search) await notifySearch(search, sub.endpoint);
   return NextResponse.json({ ok: true });

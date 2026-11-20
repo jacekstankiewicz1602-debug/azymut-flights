@@ -65,6 +65,9 @@ function pg(): postgres.Sql {
       await s`create table if not exists live_events (search_id text not null, seq int not null, data jsonb not null, primary key (search_id, seq))`;
       await s`create table if not exists app_kv (key text primary key, value jsonb not null)`;
       await s`create table if not exists push_subs (endpoint text primary key, sub jsonb not null, created_at timestamptz not null default now())`;
+      // the device's interface language and price currency: its notifications are written in them
+      await s`alter table push_subs add column if not exists lang text not null default 'pl'`;
+      await s`alter table push_subs add column if not exists cur text not null default 'PLN'`;
       await s`create table if not exists airport_hits (iata text primary key, hits int not null default 0, last_hit timestamptz not null)`;
       await s`create table if not exists searches (
         id bigserial primary key, created_at timestamptz not null default now(), query text, params jsonb,

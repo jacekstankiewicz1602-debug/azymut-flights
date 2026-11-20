@@ -1,5 +1,8 @@
 // Phone notifications: the service worker plus a Web Push subscription. On an iPhone push works only
 // in the app added to the home screen (iOS 16.4+), so there the first step is installing it.
+import { getLang } from "./i18n";
+import { wantedCurrency } from "./money";
+
 export type PushState = "unsupported" | "install" | "denied" | "on" | "off";
 
 const standalone = () => matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
@@ -27,8 +30,9 @@ export async function pushState(): Promise<PushState> {
   return sub && Notification.permission === "granted" ? "on" : "off";
 }
 
+// with the interface language and price currency: the notifications are written in them
 async function send(sub: PushSubscription, search?: string) {
-  await fetch("/api/push", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...sub.toJSON(), search }) });
+  await fetch("/api/push", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...sub.toJSON(), search, lang: getLang(), cur: wantedCurrency() }) });
 }
 
 /** This device's push endpoint when notifications are on: a search started here notifies only it. */

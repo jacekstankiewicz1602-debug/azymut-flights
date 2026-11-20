@@ -1488,7 +1488,9 @@ function TopForm() {
 export default function App() {
   const lang = useLang();
   const phone = useIsPhone();
+  // on load, and whenever the language or the currency changes: the notifications follow them
   useEffect(() => { void refreshPush(); }, []);
+  useEffect(() => { let t = 0; return onTextChange(() => { clearTimeout(t); t = window.setTimeout(() => void refreshPush(), 1500); }); }, []);
   useEffect(() => setLang(storedLang(), false), []);
   return (
     <main>

@@ -2,6 +2,8 @@
 // closed. The VAPID key pair is made on first use and kept in Neon, so Vercel and the worker share it.
 import webpush, { type PushSubscription } from "web-push";
 import { sqlClient } from "./db";
+import { placesEn } from "./places";
+import { rates } from "./rates";
 
 // the push services want an https: or mailto: contact; a local install (http://localhost) uses the project page
 const SUBJECT = process.env.APP_URL?.startsWith("https://") ? process.env.APP_URL : "https://github.com/jacekstankiewicz1602-debug/azymut-flights";
@@ -24,11 +26,27 @@ export async function publicKey(): Promise<string | null> {
   return (await keys())?.publicKey ?? null;
 }
 
-export async function subscribe(sub: PushSubscription) {
+export async function subscribe(sub: PushSubscription, lang: "pl" | "en" = "pl", cur = "PLN") {
   const sql = await sqlClient();
   if (!sql || !sub?.endpoint) return;
-  await sql`insert into push_subs (endpoint, sub) values (${sub.endpoint}, ${sql.json(sub as never)})
-    on conflict (endpoint) do update set sub = excluded.sub, created_at = now()`;
+  await sql`insert into push_subs (endpoint, sub, lang, cur) values (${sub.endpoint}, ${sql.json(sub as never)}, ${lang}, ${cur})
+    on conflict (endpoint) do update set sub = excluded.sub, lang = excluded.lang, cur = excluded.cur, created_at = now()`;
+}
+
+/** What a notification is written with: the device's language, its currency, English place names. */
+export type PushText = { en: boolean; money: (pln: number) => string; place: (text: string) => string };
+type Msg = { title: string; body: string; url: string; tag?: string };
+
+export async function textFor(lang: string, cur: string): Promise<PushText> {
+  const en = lang === "en";
+  const fx = cur === "PLN" ? null : (await rates())?.rates[cur] ?? null;
+  const money = (pln: number) => {
+    if (!fx) return `${Math.round(pln).toLocaleString("pl-PL")} zł`;
+    const v = pln * fx, d = Math.abs(v) < 10 ? 2 : 0;
+    try { return new Intl.NumberFormat(en ? "en-GB" : "pl-PL", { style: "currency", currency: cur, minimumFractionDigits: d, maximumFractionDigits: d }).format(v); }
+    catch { return `${Math.round(v)} ${cur}`; }
+  };
+  return { en, money, place: en ? placesEn : (s) => s };
 }
 
 export async function unsubscribe(endpoint: string) {
@@ -44,13 +62,14 @@ export async function notifySearch(id: string, endpoint: string) {
 
 /** Sends to the devices that started the search (not every subscribed phone: friends share the app);
  * drops subscriptions the push service no longer knows. */
-export async function pushSearch(id: string, msg: { title: string; body: string; url: string; tag?: string }) {
+export async function pushSearch(id: string, build: (t: PushText) => Msg) {
   const sql = await sqlClient();
   const k = await keys();
   if (!sql || !k) return;
-  const rows = await sql`select endpoint, sub from push_subs where endpoint = any(select unnest(notify) from live_searches where id = ${id})`;
+  const rows = await sql`select endpoint, sub, lang, cur from push_subs where endpoint = any(select unnest(notify) from live_searches where id = ${id})`;
   await Promise.all(rows.map(async (r) => {
     try {
+      const msg = build(await textFor(r.lang as string, r.cur as string));
       await webpush.sendNotification(r.sub as PushSubscription, JSON.stringify(msg), { vapidDetails: { subject: SUBJECT, ...k }, TTL: 24 * 3600, urgency: "high" });
     } catch (e) {
       const code = (e as { statusCode?: number }).statusCode;

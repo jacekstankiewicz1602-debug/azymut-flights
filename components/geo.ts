@@ -2,6 +2,7 @@ import airports from "@/lib/data/airports.json";
 import extra from "@/lib/data/airports-extra-pos.json";
 import { getLang, setPlaceFilter } from "./i18n";
 import { money } from "./money";
+import { placesEn } from "@/lib/places";
 
 type Pos = { lat: number; lon: number; city: string; cityEn?: string; cc: string; tz: string; region: string };
 /** Every airport with scheduled service: the curated core plus the compact rest ([iata, lat, lon, city, cc, tz, region]). */
@@ -13,25 +14,8 @@ export const AIRPORT_POS: Record<string, Pos> = Object.fromEntries([
 /** City of an airport in the interface language ("Szardża" / "Sharjah"); the rest of the world is in English already. */
 export const cityName = (code: string) => { const a = AIRPORT_POS[code]; return !a ? code : getLang() === "en" ? a.cityEn || a.city : a.city; };
 
-// Polish place names inside text from the server ("Radom → Islandia", "Radom – Szardża – Male") → English:
-// the airport cities with an English name of their own, and every country (Intl, pl → en)
-let PLACES: [RegExp, Record<string, string>] | null = null;
-function places(): [RegExp, Record<string, string>] {
-  if (PLACES) return PLACES;
-  const map: Record<string, string> = {};
-  for (const a of airports as { city: string; cityEn?: string }[]) for (const [pl, en] of [[a.city, a.cityEn], [a.city.split("-")[0], a.cityEn?.split("-")[0]]]) if (pl && en && pl !== en) map[pl] = en;
-  try {
-    const pl = new Intl.DisplayNames(["pl"], { type: "region" }), en = new Intl.DisplayNames(["en"], { type: "region" });
-    for (const cc of new Set(Object.values(AIRPORT_POS).map((p) => p.cc))) { const p = pl.of(cc), e = en.of(cc); if (p && e && p !== e && p !== cc) map[p] = e; }
-  } catch { /* no Intl.DisplayNames */ }
-  const keys = Object.keys(map).sort((a, b) => b.length - a.length).map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  PLACES = [new RegExp(`(?<![\\p{L}])(${keys.join("|")})(?![\\p{L}])`, "gu"), map];
-  return PLACES;
-}
-export function placesEn(text: string): string {
-  const [re, map] = places();
-  return text.replace(re, (m) => map[m] ?? m);
-}
+// Polish place names in text from the server → English (lib/places.ts)
+export { placesEn };
 setPlaceFilter(placesEn);
 
 /** A PLN amount in the chosen display currency (money.ts). */
