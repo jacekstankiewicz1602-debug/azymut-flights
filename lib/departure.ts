@@ -21,9 +21,22 @@ export const accessEstH = (a: string, b: string) => (a === b ? 0 : km(AP[a], AP[
 
 export function withDeparture(p: SearchParams): SearchParams {
   if (p.ground) return p; // already expanded
+  const d = expand(p);
+  // a destination is never also a departure (the trip would stay inside the destination country);
+  // not for "gdziekolwiek" and the wide regions, whose list covers home as well
+  if (p.mode === "anywhere" || p.dest.length > 100) return d;
+  const dest = new Set(p.dest);
+  const origin = d.origin.filter((c) => !dest.has(c));
+  return origin.length ? { ...d, origin, ground: (d.ground ?? []).filter((c) => !dest.has(c)) } : d;
+}
+
+function expand(p: SearchParams): SearchParams {
   // "tylko stąd": the typed city's or country's own airports, nothing around them, no bus
   if (p.strict) return { ...p, origin: p.departs?.length ? p.departs.filter((c) => AP[c]) : p.origin, ground: [] };
-  const home = p.home && AP[p.home] ? p.home : p.origin[0];
+  // home counts only when the trip starts there or near it: "Los Angeles → Polska" from a Poznań
+  // user starts in LA, and the Polish airports around home must not become departures
+  const fromHome = !!p.home && !!AP[p.home] && (p.departs?.length ? p.departs : p.origin).some((c) => AP[c] && km(AP[c], AP[p.home!]) <= config.originRadiusKm);
+  const home = fromHome ? p.home! : p.origin[0];
   const h = AP[home];
   const near = (c: string) => !!AP[c] && km(h, AP[c]) <= config.originRadiusKm;
   // a country as the origin: its own airports plus the big ones next door (Polska: Berlin, Praga, Budapeszt);
