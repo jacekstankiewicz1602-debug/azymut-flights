@@ -91,7 +91,14 @@ export async function rememberedTrips(p: SearchParams, n = 4): Promise<Trip[]> {
     and jsonb_array_length(trips) > 0 order by created_at desc limit 40`.catch(() => []);
   const lo = new Date(Date.parse(p.dateFrom) - 3 * 86400_000).toISOString().slice(0, 10);
   const hi = new Date(Date.parse(p.dateTo) + 3 * 86400_000).toISOString().slice(0, 10);
-  const fits = (t: Trip) => t.outDate >= lo && t.outDate <= hi && (p.oneWay || (t.stayDays !== null && t.stayDays >= p.stayMin && t.stayDays <= p.stayMax));
+  // and only trips that really start at this search's departures and reach its destinations (an earlier
+  // search of the same direction may have had other departures)
+  const home = new Set([...p.origin, ...(p.ground ?? [])]), dest = new Set([...p.dest, ...(p.destRet ?? [])]);
+  const ends = (t: Trip) => {
+    const out = t.legs.filter((l) => l.dir === "out"), ret = t.legs.filter((l) => l.dir === "ret");
+    return !!out.length && home.has(out[0].from) && dest.has(out[out.length - 1].to) && (p.oneWay || (!!ret.length && dest.has(ret[0].from) && home.has(ret[ret.length - 1].to)));
+  };
+  const fits = (t: Trip) => t.outDate >= lo && t.outDate <= hi && (p.oneWay || (t.stayDays !== null && t.stayDays >= p.stayMin && t.stayDays <= p.stayMax)) && ends(t);
   const seen = new Set<string>();
   return [...(await precomputedFor(p).catch(() => [] as Trip[])), ...(rows as unknown as { params: SearchParams; trips: Trip[] }[]).filter((r) => same(r.params)).flatMap((r) => r.trips)]
     .filter((t) => Number.isFinite(t.price) && !t.google && fits(t))
